@@ -1,6 +1,9 @@
 # Identity
 
 Identity is the foundation of ConnectID.
+A ConnectID identity is a persistent virtual identity represented by a unique username and citizen profile.
+A user may cryptographically link one (for now) external blockchain wallet to that identity.
+The wallet provides verifiable ownership and transparency without requiring the user's legal name to be publicly disclosed.
 
 ## The principle
 
