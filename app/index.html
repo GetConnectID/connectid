@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>ConnectID</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            background: #0b0b0b;
+            color: #ffffff;
+            min-height: 100vh;
+        }
+
+        .app {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 28px;
+            border-bottom: 1px solid #222222;
+            background: #101010;
+        }
+
+        .logo {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+
+        .logo span {
+            color: #ff7a00;
+        }
+
+        .profile-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #ff7a00;
+            color: #000000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .welcome {
+            width: 100%;
+            max-width: 620px;
+            text-align: center;
+        }
+
+        .welcome h1 {
+            font-size: 48px;
+            margin-bottom: 18px;
+        }
+
+        .welcome h1 span {
+            color: #ff7a00;
+        }
+
+        .welcome p {
+            color: #b5b5b5;
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 35px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 15px 28px;
+            border-radius: 10px;
+            background: #ff7a00;
+            color: #000000;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .button:hover {
+            opacity: 0.9;
+        }
+
+        .tagline {
+            margin-top: 28px;
+            color: #777777;
+            font-size: 14px;
+        }
+
+        @media (max-width: 600px) {
+            header {
+                padding: 0 18px;
+            }
+
+            .welcome h1 {
+                font-size: 36px;
+            }
+
+            .welcome p {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="app">
+
+    <header>
+        <div class="logo">
+            Connect<span>ID</span>
+        </div>
+
+        <div class="profile-button">
+            C
+        </div>
+    </header>
+
+    <main>
+
+        <section class="welcome">
+
+            <h1>
+                Welcome to <span>ConnectID</span>
+            </h1>
+
+            <p>
+                A digital society built around identity,
+                reputation and meaningful connections.
+            </p>
+
+            <a href="#" class="button">
+                Create your ConnectID
+            </a>
+
+            <div class="tagline">
+                Own your identity. Build your reputation.
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
+</body>
+</html>
