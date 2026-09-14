@@ -248,7 +248,7 @@ $walletStatus = $user['wallet_address']
 
         <nav class="nav">
             <a href="home.php" class="active">Home</a>
-            <a href="messages.html">Messages</a>
+            <a href="messages.php">Messages</a>
             <a href="connections.html">Connections</a>
             <a href="communities.html">Communities</a>
             <a href="profile.php">Profile</a>
