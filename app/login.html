@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in - ConnectID</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #050505;
+            color: #ffffff;
+            font-family: Arial, Helvetica, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 420px;
+            background: #111111;
+            border: 1px solid #292929;
+            border-radius: 18px;
+            padding: 40px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 35px;
+        }
+
+        .logo span {
+            color: #ff7a00;
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: 30px;
+        }
+
+        .subtitle {
+            color: #999999;
+            margin-bottom: 30px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #cccccc;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 20px;
+            background: #080808;
+            color: #ffffff;
+            border: 1px solid #333333;
+            border-radius: 10px;
+            font-size: 15px;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #ff7a00;
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            border: 0;
+            border-radius: 10px;
+            background: #ff7a00;
+            color: white;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .register {
+            margin-top: 25px;
+            text-align: center;
+            color: #888888;
+            font-size: 14px;
+        }
+
+        .register a {
+            color: #ff7a00;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="card">
+
+    <div class="logo">
+        Connect<span>ID</span>
+    </div>
+
+    <h1>Welcome back</h1>
+
+    <div class="subtitle">
+        Sign in to your ConnectID.
+    </div>
+
+    <form action="backend/login.php" method="POST">
+
+        <label for="username">Username</label>
+        <input
+            type="text"
+            id="username"
+            name="username"
+            placeholder="@username"
+            required
+        >
+
+        <label for="password">Password</label>
+        <input
+            type="password"
+            id="password"
+            name="password"
+            placeholder="Your password"
+            required
+        >
+
+        <button type="submit">
+            Sign in
+        </button>
+
+    </form>
+
+    <div class="register">
+        New to ConnectID?
+        <a href="register.html">Become a Citizen</a>
+    </div>
+
+</div>
+
+</body>
+</html>
