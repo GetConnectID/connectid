@@ -3,44 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
     <title>Create your ConnectID</title>
 
     <style>
         * {
             box-sizing: border-box;
-            margin: 0;
-            padding: 0;
         }
 
         body {
-            font-family: Arial, Helvetica, sans-serif;
-            background: #0b0b0b;
+            margin: 0;
+            min-height: 100vh;
+            background: #050505;
             color: #ffffff;
-            min-height: 100vh;
-        }
-
-        .container {
-            min-height: 100vh;
+            font-family: Arial, Helvetica, sans-serif;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 25px;
+            padding: 20px;
         }
 
         .card {
             width: 100%;
-            max-width: 480px;
-            background: #121212;
-            border: 1px solid #252525;
+            max-width: 460px;
+            background: #111111;
+            border: 1px solid #292929;
             border-radius: 18px;
             padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
         }
 
         .logo {
-            font-size: 22px;
+            font-size: 28px;
             font-weight: 700;
-            letter-spacing: 1px;
             margin-bottom: 35px;
         }
 
@@ -49,83 +43,59 @@
         }
 
         h1 {
-            font-size: 32px;
-            margin-bottom: 10px;
+            margin: 0 0 10px;
+            font-size: 30px;
         }
 
-        .intro {
+        .subtitle {
             color: #999999;
-            line-height: 1.6;
+            line-height: 1.5;
             margin-bottom: 30px;
         }
 
         label {
             display: block;
-            font-size: 14px;
-            font-weight: 600;
             margin-bottom: 8px;
+            font-size: 14px;
+            color: #cccccc;
         }
 
         input {
             width: 100%;
-            padding: 14px;
+            padding: 14px 15px;
             margin-bottom: 20px;
-            border-radius: 10px;
-            border: 1px solid #333333;
-            background: #0b0b0b;
+            background: #080808;
             color: #ffffff;
-            font-size: 16px;
+            border: 1px solid #333333;
+            border-radius: 10px;
             outline: none;
+            font-size: 15px;
         }
 
         input:focus {
             border-color: #ff7a00;
         }
 
-        .username {
-            position: relative;
-        }
-
-        .username span {
-            position: absolute;
-            left: 14px;
-            top: 14px;
-            color: #ff7a00;
-            font-size: 16px;
-        }
-
-        .username input {
-            padding-left: 30px;
-        }
-
         .avatar {
             width: 80px;
             height: 80px;
             border-radius: 50%;
-            background: #ff7a00;
-            color: #000000;
+            background: #202020;
+            border: 1px solid #333333;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 28px;
-            font-weight: 700;
-            margin: 5px auto 25px;
-        }
-
-        .avatar-text {
-            text-align: center;
-            color: #888888;
-            font-size: 13px;
+            color: #777777;
             margin-bottom: 25px;
         }
 
         button {
             width: 100%;
-            padding: 15px;
-            border: none;
+            border: 0;
             border-radius: 10px;
+            padding: 15px;
             background: #ff7a00;
-            color: #000000;
+            color: #ffffff;
             font-size: 16px;
             font-weight: 700;
             cursor: pointer;
@@ -135,34 +105,28 @@
             opacity: 0.9;
         }
 
-        .wallet {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #252525;
-            border-radius: 10px;
-            color: #888888;
+        .note {
+            margin-top: 18px;
             font-size: 13px;
+            color: #777777;
             line-height: 1.5;
         }
 
-        .wallet strong {
-            color: #ffffff;
-        }
-
-        .terms {
+        .login {
+            margin-top: 25px;
             text-align: center;
-            margin-top: 20px;
-            color: #666666;
-            font-size: 12px;
+            font-size: 14px;
+            color: #888888;
         }
 
-        @media (max-width: 600px) {
+        .login a {
+            color: #ff7a00;
+            text-decoration: none;
+        }
+
+        @media (max-width: 500px) {
             .card {
                 padding: 28px 22px;
-            }
-
-            h1 {
-                font-size: 28px;
             }
         }
     </style>
@@ -170,72 +134,77 @@
 
 <body>
 
-<div class="container">
+<div class="card">
 
-    <div class="card">
+    <div class="logo">
+        Connect<span>ID</span>
+    </div>
 
-        <div class="logo">
-            Connect<span>ID</span>
-        </div>
+    <h1>Create your ConnectID</h1>
 
-        <h1>Create your ConnectID</h1>
+    <div class="subtitle">
+        Create your identity and become a Citizen of ConnectID.
+    </div>
 
-        <p class="intro">
-            Create your digital identity and become a Citizen.
-            No cryptocurrency or wallet is required.
-        </p>
+    <form action="backend/register.php" method="POST">
 
-        <div class="avatar">
-            C
-        </div>
-
-        <p class="avatar-text">
-            Choose your ConnectID avatar
-        </p>
-
-        <label for="name">Display name</label>
+        <label for="display_name">Display name</label>
         <input
             type="text"
-            id="name"
+            id="display_name"
+            name="display_name"
             placeholder="Your name"
+            maxlength="80"
+            required
         >
 
         <label for="username">Username</label>
+        <input
+            type="text"
+            id="username"
+            name="username"
+            placeholder="@username"
+            maxlength="30"
+            required
+        >
 
-        <div class="username">
-            <span>@</span>
-            <input
-                type="text"
-                id="username"
-                placeholder="username"
-            >
+        <label for="password">Password</label>
+        <input
+            type="password"
+            id="password"
+            name="password"
+            placeholder="Create a password"
+            minlength="8"
+            required
+        >
+
+        <label for="password_confirm">Confirm password</label>
+        <input
+            type="password"
+            id="password_confirm"
+            name="password_confirm"
+            placeholder="Repeat your password"
+            minlength="8"
+            required
+        >
+
+        <div class="avatar">
+            Avatar
         </div>
 
-        <a href="home.html" style="
-    display: block;
-    width: 100%;
-    padding: 15px;
-    border-radius: 10px;
-    background: #ff7a00;
-    color: #000000;
-    font-size: 16px;
-    font-weight: 700;
-    text-align: center;
-    text-decoration: none;
-">
-    Become a Citizen
-            </a>
+        <button type="submit">
+            Become a Citizen
+        </button>
 
-        <div class="wallet">
-            <strong>Wallet connection</strong><br>
-            Optional. You can connect a crypto wallet later.
-            ConnectID can be used normally without one.
-        </div>
+    </form>
 
-        <div class="terms">
-            Own your identity. Build your reputation.
-        </div>
+    <div class="note">
+        A wallet is optional. You do not need crypto to become a Citizen.
+    </div>
 
+    <div class="login">
+        Already have a ConnectID?
+        <a href="login.html">Sign in</a>
     </div>
 
 </div>
