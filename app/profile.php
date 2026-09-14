@@ -3,37 +3,66 @@
 require_once __DIR__ . '/backend/auth.php';
 require_once __DIR__ . '/backend/db.php';
 
-$stmt = $pdo->prepare(
-    'SELECT id, username, display_name, avatar, citizen, role, reputation, wallet_address, created_at
-     FROM users
-     WHERE id = :id
-     LIMIT 1'
-);
+$userId = (int) $_SESSION['user_id'];
 
-$stmt->execute([
-    'id' => $_SESSION['user_id']
-]);
+$stmt = $pdo->prepare("
+    SELECT
+        id,
+        username,
+        display_name,
+        avatar,
+        citizen,
+        role,
+        reputation,
+        wallet_address,
+        created_at
+    FROM users
+    WHERE id = :id
+    LIMIT 1
+");
 
+$stmt->execute([':id' => $userId]);
 $user = $stmt->fetch();
 
 if (!$user) {
-    header('Location: backend/logout.php');
+    session_destroy();
+    header('Location: login.html');
     exit;
 }
 
-$role = strtoupper($user['role']);
-$walletStatus = $user['wallet_address']
-    ? 'Connected'
-    : 'Not connected';
-?>
+$eventsStmt = $pdo->prepare("
+    SELECT
+        points,
+        type,
+        reason,
+        created_at
+    FROM reputation_events
+    WHERE user_id = :user_id
+    ORDER BY created_at DESC
+    LIMIT 20
+");
 
+$eventsStmt->execute([':user_id' => $userId]);
+$events = $eventsStmt->fetchAll();
+
+$role = strtoupper($user['role']);
+$citizen = $user['citizen'] ? 'CITIZEN' : 'NOT A CITIZEN';
+$walletStatus = !empty($user['wallet_address'])
+    ? 'CONNECTED'
+    : 'NOT CONNECTED';
+
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>Your Identity - ConnectID</title>
+    <title>ConnectID Profile</title>
 
     <style>
         * {
@@ -42,257 +71,217 @@ $walletStatus = $user['wallet_address']
 
         body {
             margin: 0;
-            background: #050505;
-            color: #ffffff;
-            font-family: Arial, Helvetica, sans-serif;
+            font-family: Arial, sans-serif;
+            background: #000;
+            color: #fff;
         }
 
-        .layout {
-            min-height: 100vh;
+        nav {
+            padding: 20px;
+            border-bottom: 1px solid #222;
             display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
         }
 
-        .sidebar {
-            width: 240px;
-            background: #0d0d0d;
-            border-right: 1px solid #222222;
-            padding: 28px 18px;
-        }
-
-        .logo {
-            font-size: 25px;
-            font-weight: 700;
-            padding: 0 12px;
-            margin-bottom: 40px;
-        }
-
-        .logo span {
-            color: #ff7a00;
-        }
-
-        .nav a {
-            display: block;
-            padding: 13px 12px;
-            margin-bottom: 5px;
-            border-radius: 9px;
-            color: #999999;
+        nav a {
+            color: #fff;
             text-decoration: none;
         }
 
-        .nav a:hover,
-        .nav a.active {
-            background: #1a1a1a;
-            color: #ffffff;
+        nav a:hover {
+            color: #ff6a00;
         }
 
-        .main {
-            flex: 1;
-            max-width: 1000px;
-            padding: 50px;
-        }
-
-        .title {
-            margin-bottom: 30px;
-        }
-
-        .title h1 {
-            margin: 0 0 8px;
-            font-size: 34px;
-        }
-
-        .title p {
-            color: #888888;
-        }
-
-        .profile {
-            background: #111111;
-            border: 1px solid #292929;
-            border-radius: 18px;
-            padding: 35px;
-        }
-
-        .profile-top {
-            display: flex;
-            align-items: center;
-            gap: 22px;
-            padding-bottom: 30px;
-            border-bottom: 1px solid #292929;
-        }
-
-        .avatar {
-            width: 90px;
-            height: 90px;
-            border-radius: 50%;
-            background: #222222;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #777777;
-        }
-
-        h2 {
-            margin: 0 0 7px;
-            font-size: 27px;
-        }
-
-        .username {
-            color: #888888;
-        }
-
-        .role {
-            display: inline-block;
-            margin-top: 10px;
-            color: #ff7a00;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-
-        .details {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 18px;
-            margin-top: 30px;
-        }
-
-        .detail {
-            background: #0a0a0a;
-            border: 1px solid #222222;
-            border-radius: 12px;
+        .container {
+            max-width: 900px;
+            margin: 50px auto;
             padding: 20px;
         }
 
+        .profile {
+            border: 1px solid #222;
+            border-radius: 16px;
+            padding: 30px;
+            background: #0b0b0b;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .username {
+            color: #aaa;
+            margin-bottom: 30px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 7px 12px;
+            border-radius: 20px;
+            background: #ff6a00;
+            color: #000;
+            font-weight: bold;
+            margin-bottom: 25px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .stat {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 18px;
+        }
+
         .label {
-            color: #777777;
+            color: #888;
             font-size: 13px;
             margin-bottom: 8px;
         }
 
         .value {
-            font-size: 18px;
-            font-weight: 600;
+            font-size: 20px;
+            font-weight: bold;
         }
 
-        .back {
-            display: inline-block;
-            margin-top: 25px;
-            color: #ff7a00;
-            text-decoration: none;
+        .reputation {
+            margin-top: 30px;
         }
 
-        @media (max-width: 800px) {
-            .layout {
-                display: block;
-            }
+        .reputation h2 {
+            margin-bottom: 15px;
+        }
 
-            .sidebar {
-                width: 100%;
-                border-right: 0;
-                border-bottom: 1px solid #222222;
-            }
+        .event {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 15px 0;
+            border-bottom: 1px solid #222;
+        }
 
-            .main {
-                padding: 25px 18px;
-            }
+        .event-reason {
+            color: #ddd;
+        }
 
-            .details {
-                grid-template-columns: 1fr;
-            }
+        .event-type {
+            color: #777;
+            font-size: 13px;
+            margin-top: 5px;
+        }
+
+        .points {
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .positive {
+            color: #7cff7c;
+        }
+
+        .negative {
+            color: #ff6666;
+        }
+
+        .empty {
+            color: #777;
+            padding: 15px 0;
         }
     </style>
 </head>
 
 <body>
 
-<div class="layout">
+<nav>
+    <a href="home.php">Home</a>
+    <a href="profile.php">Profile</a>
+    <a href="connections.php">Connections</a>
+    <a href="messages.php">Messages</a>
+    <a href="communities.php">Communities</a>
+    <a href="backend/logout.php">Logout</a>
+</nav>
 
-    <aside class="sidebar">
+<div class="container">
 
-        <div class="logo">
-            Connect<span>ID</span>
+    <div class="profile">
+
+        <span class="badge"><?= e($role) ?></span>
+
+        <h1><?= e($user['display_name']) ?></h1>
+
+        <div class="username">
+            @<?= e($user['username']) ?>
         </div>
 
-        <nav class="nav">
-            <a href="home.php">Home</a>
-            <a href="messages.php">Messages</a>
-            <a href="connections.html">Connections</a>
-            <a href="communities.html">Communities</a>
-            <a href="profile.php" class="active">Profile</a>
-            <a href="backend/logout.php">Sign out</a>
-        </nav>
+        <div class="stats">
 
-    </aside>
+            <div class="stat">
+                <div class="label">Identity</div>
+                <div class="value"><?= e($citizen) ?></div>
+            </div>
 
-    <main class="main">
+            <div class="stat">
+                <div class="label">Reputation</div>
+                <div class="value"><?= (int) $user['reputation'] ?></div>
+            </div>
 
-        <div class="title">
-            <h1>Your Identity</h1>
-            <p>This is your identity inside ConnectID.</p>
+            <div class="stat">
+                <div class="label">Wallet</div>
+                <div class="value"><?= e($walletStatus) ?></div>
+            </div>
+
+            <div class="stat">
+                <div class="label">Role</div>
+                <div class="value"><?= e($role) ?></div>
+            </div>
+
         </div>
 
-        <section class="profile">
+        <div class="reputation">
 
-            <div class="profile-top">
+            <h2>Reputation history</h2>
 
-                <div class="avatar">
-                    Avatar
+            <?php if (!$events): ?>
+
+                <div class="empty">
+                    No reputation activity yet.
                 </div>
 
-                <div>
+            <?php else: ?>
 
-                    <h2>
-                        <?= htmlspecialchars($user['display_name']) ?>
-                    </h2>
+                <?php foreach ($events as $event): ?>
 
-                    <div class="username">
-                        @<?= htmlspecialchars($user['username']) ?>
+                    <div class="event">
+
+                        <div>
+                            <div class="event-reason">
+                                <?= e($event['reason']) ?>
+                            </div>
+
+                            <div class="event-type">
+                                <?= e($event['type']) ?>
+                            </div>
+                        </div>
+
+                        <div class="points <?= ((int) $event['points'] >= 0) ? 'positive' : 'negative' ?>">
+                            <?= ((int) $event['points'] >= 0 ? '+' : '') . (int) $event['points'] ?>
+                        </div>
+
                     </div>
 
-                    <div class="role">
-                        <?= htmlspecialchars($role) ?>
-                    </div>
+                <?php endforeach; ?>
 
-                </div>
+            <?php endif; ?>
 
-            </div>
+        </div>
 
-            <div class="details">
-
-                <div class="detail">
-                    <div class="label">Identity</div>
-                    <div class="value">Citizen</div>
-                </div>
-
-                <div class="detail">
-                    <div class="label">Role</div>
-                    <div class="value">
-                        <?= htmlspecialchars($role) ?>
-                    </div>
-                </div>
-
-                <div class="detail">
-                    <div class="label">Reputation</div>
-                    <div class="value">
-                        <?= (int) $user['reputation'] ?>
-                    </div>
-                </div>
-
-                <div class="detail">
-                    <div class="label">Wallet</div>
-                    <div class="value">
-                        <?= htmlspecialchars($walletStatus) ?>
-                    </div>
-                </div>
-
-            </div>
-
-            <a href="home.php" class="back">
-                ← Back to Home
-            </a>
-
-        </section>
-
-    </main>
+    </div>
 
 </div>
 
