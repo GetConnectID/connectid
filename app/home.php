@@ -329,7 +329,7 @@ $walletStatus = $user['wallet_address']
                 and become part of the ConnectID community.
             </p>
 
-            <a href="connections.html" class="button">
+            <a href="connections.php" class="button">
                 Find people
             </a>
 
