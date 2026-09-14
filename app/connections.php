@@ -247,7 +247,7 @@ Connect<span>ID</span>
 
 <a href="home.php">Home</a>
 
-<a href="messages.html">Messages</a>
+<a href="messages.php">Messages</a>
 
 <a href="connections.php" class="active">Connections</a>
 
