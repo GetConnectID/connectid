@@ -2,11 +2,17 @@
 
 require_once __DIR__ . '/backend/auth.php';
 require_once __DIR__ . '/backend/db.php';
+require_once __DIR__ . '/backend/csrf.php';
 
-$userId = $_SESSION['user_id'];
+$userId = (int) $_SESSION['user_id'];
 
-$stmt = $pdo->query(
-    'SELECT
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+$stmt = $pdo->query("
+    SELECT
         c.id,
         c.name,
         c.description,
@@ -15,13 +21,13 @@ $stmt = $pdo->query(
         u.username AS creator_username,
         u.display_name AS creator_name,
         COUNT(cm.id) AS member_count
-     FROM communities c
-     JOIN users u
-       ON u.id = c.creator_id
-     LEFT JOIN community_members cm
-       ON cm.community_id = c.id
-     WHERE c.status = "active"
-     GROUP BY
+    FROM communities c
+    JOIN users u
+        ON u.id = c.creator_id
+    LEFT JOIN community_members cm
+        ON cm.community_id = c.id
+    WHERE c.status = 'active'
+    GROUP BY
         c.id,
         c.name,
         c.description,
@@ -29,391 +35,271 @@ $stmt = $pdo->query(
         c.created_at,
         u.username,
         u.display_name
-     ORDER BY c.created_at DESC'
-);
+    ORDER BY c.created_at DESC
+");
 
 $communities = $stmt->fetchAll();
 
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
 
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
 
-<title>Communities - ConnectID</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-<style>
+    <title>ConnectID Communities</title>
 
-* {
-    box-sizing: border-box;
-}
+    <style>
 
-body {
-    margin: 0;
-    background: #050505;
-    color: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
-}
+        * {
+            box-sizing: border-box;
+        }
 
-.layout {
-    min-height: 100vh;
-    display: flex;
-}
+        body {
+            margin: 0;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
 
-.sidebar {
-    width: 240px;
-    background: #0d0d0d;
-    border-right: 1px solid #222222;
-    padding: 28px 18px;
-}
+        nav {
+            padding: 20px;
+            border-bottom: 1px solid #222;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
 
-.logo {
-    font-size: 25px;
-    font-weight: 700;
-    padding: 0 12px;
-    margin-bottom: 40px;
-}
+        nav a {
+            color: #fff;
+            text-decoration: none;
+        }
 
-.logo span {
-    color: #ff7a00;
-}
+        nav a:hover {
+            color: #ff6a00;
+        }
 
-.nav a {
-    display: block;
-    padding: 13px 12px;
-    margin-bottom: 5px;
-    border-radius: 9px;
-    color: #999999;
-    text-decoration: none;
-}
+        .container {
+            max-width: 1000px;
+            margin: 40px auto;
+            padding: 20px;
+        }
 
-.nav a:hover,
-.nav a.active {
-    background: #1a1a1a;
-    color: #ffffff;
-}
+        .card {
+            background: #0b0b0b;
+            border: 1px solid #222;
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 25px;
+        }
 
-.main {
-    flex: 1;
-    max-width: 1100px;
-    padding: 50px;
-}
+        h1,
+        h2 {
+            margin-top: 0;
+        }
 
-.header {
-    margin-bottom: 30px;
-}
+        input,
+        textarea {
+            width: 100%;
+            padding: 14px;
+            margin: 8px 0;
+            background: #111;
+            color: #fff;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
 
-.header h1 {
-    margin: 0 0 8px;
-    font-size: 34px;
-}
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
 
-.header p {
-    margin: 0;
-    color: #888888;
-}
+        button {
+            padding: 11px 18px;
+            background: #ff6a00;
+            color: #000;
+            border: 0;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
 
-.create {
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 16px;
-    padding: 25px;
-    margin-bottom: 30px;
-}
+        .community {
+            border-top: 1px solid #222;
+            padding: 22px 0;
+        }
 
-.create h2 {
-    margin-top: 0;
-}
+        .community:first-child {
+            border-top: 0;
+        }
 
-.create form {
-    display: grid;
-    gap: 12px;
-}
+        .description {
+            color: #bbb;
+            margin: 10px 0;
+        }
 
-input,
-textarea {
-    width: 100%;
-    background: #080808;
-    color: #ffffff;
-    border: 1px solid #333333;
-    border-radius: 9px;
-    padding: 13px;
-    font-family: inherit;
-    resize: vertical;
-}
+        .meta {
+            color: #777;
+            font-size: 13px;
+            margin-bottom: 15px;
+        }
 
-textarea {
-    min-height: 90px;
-}
-
-button {
-    width: fit-content;
-    border: 0;
-    border-radius: 9px;
-    padding: 12px 20px;
-    background: #ff7a00;
-    color: #ffffff;
-    font-weight: 700;
-    cursor: pointer;
-}
-
-.grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 18px;
-}
-
-.community {
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 16px;
-    padding: 25px;
-}
-
-.community h2 {
-    margin-top: 0;
-    margin-bottom: 8px;
-}
-
-.description {
-    color: #888888;
-    line-height: 1.5;
-    min-height: 45px;
-}
-
-.meta {
-    color: #666666;
-    font-size: 13px;
-    margin: 18px 0;
-}
-
-.actions {
-    display: flex;
-    gap: 10px;
-}
-
-.actions form {
-    margin: 0;
-}
-
-.secondary {
-    background: #222222;
-}
-
-.empty {
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 16px;
-    padding: 30px;
-    color: #777777;
-}
-
-@media (max-width: 850px) {
-
-    .layout {
-        display: block;
-    }
-
-    .sidebar {
-        width: 100%;
-        border-right: 0;
-        border-bottom: 1px solid #222222;
-    }
-
-    .main {
-        padding: 25px 18px;
-    }
-
-    .grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-</style>
+    </style>
 
 </head>
 
 <body>
 
-<div class="layout">
-
-<aside class="sidebar">
-
-<div class="logo">
-Connect<span>ID</span>
-</div>
-
-<nav class="nav">
-
-<a href="home.php">Home</a>
-
-<a href="messages.php">Messages</a>
-
-<a href="connections.php">Connections</a>
-
-<a href="communities.php" class="active">Communities</a>
-
-<a href="profile.php">Profile</a>
-
-<a href="backend/logout.php">Sign out</a>
-
+<nav>
+    <a href="home.php">Home</a>
+    <a href="profile.php">Profile</a>
+    <a href="connections.php">Connections</a>
+    <a href="messages.php">Messages</a>
+    <a href="communities.php">Communities</a>
+    <a href="backend/logout.php">Logout</a>
 </nav>
 
-</aside>
+<div class="container">
 
-<main class="main">
+    <div class="card">
 
-<div class="header">
+        <h1>Communities</h1>
 
-<h1>Communities</h1>
+        <p>
+            Discover and build communities around shared interests.
+        </p>
 
-<p>
-Discover communities and participate in shared interests.
-</p>
+    </div>
 
-</div>
+    <div class="card">
 
-<div class="create">
+        <h2>Create a community</h2>
 
-<h2>Create a community</h2>
+        <form method="POST" action="backend/communities.php">
 
-<form action="backend/communities.php" method="POST">
+            <input
+                type="text"
+                name="name"
+                maxlength="100"
+                placeholder="Community name"
+                required
+            >
 
-<input
-type="hidden"
-name="action"
-value="create"
->
+            <textarea
+                name="description"
+                maxlength="2000"
+                placeholder="Describe your community"
+            ></textarea>
 
-<input
-type="text"
-name="name"
-placeholder="Community name"
-maxlength="100"
-required
->
+            <input
+                type="hidden"
+                name="action"
+                value="create"
+            >
 
-<textarea
-name="description"
-placeholder="What is this community about?"
-maxlength="2000"
-></textarea>
+            <input
+                type="hidden"
+                name="csrf_token"
+                value="<?= e(csrfToken()) ?>"
+            >
 
-<button type="submit">
-Create community
-</button>
+            <button type="submit">
+                Create community
+            </button>
 
-</form>
+        </form>
 
-</div>
+    </div>
 
-<?php if (!$communities): ?>
+    <div class="card">
 
-<div class="empty">
+        <h2>Available communities</h2>
 
-No communities exist yet.
+        <?php if (!$communities): ?>
 
-Be the first to create one.
+            <p>
+                No communities exist yet.
+            </p>
 
-</div>
+        <?php else: ?>
 
-<?php else: ?>
+            <?php foreach ($communities as $community): ?>
 
-<div class="grid">
+                <div class="community">
 
-<?php foreach ($communities as $community): ?>
+                    <h3>
+                        <?= e($community['name']) ?>
+                    </h3>
 
-<div class="community">
+                    <div class="description">
+                        <?= nl2br(e($community['description'] ?? '')) ?>
+                    </div>
 
-<h2>
-<?= htmlspecialchars($community['name']) ?>
-</h2>
+                    <div class="meta">
 
-<div class="description">
+                        Created by
+                        @<?= e($community['creator_username']) ?>
 
-<?= nl2br(htmlspecialchars($community['description'])) ?>
+                        ·
 
-</div>
+                        <?= (int) $community['member_count'] ?>
+                        member(s)
 
-<div class="meta">
+                    </div>
 
-<?= (int) $community['member_count'] ?> member(s)
+                    <?php if ((int) $community['creator_id'] !== $userId): ?>
 
-<br>
+                        <form
+                            method="POST"
+                            action="backend/community_action.php"
+                        >
 
-Created by @<?= htmlspecialchars($community['creator_username']) ?>
+                            <input
+                                type="hidden"
+                                name="community_id"
+                                value="<?= (int) $community['id'] ?>"
+                            >
 
-</div>
+                            <input
+                                type="hidden"
+                                name="action"
+                                value="join"
+                            >
 
-<div class="actions">
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="<?= e(csrfToken()) ?>"
+                            >
 
-<form
-action="backend/community_action.php"
-method="POST"
->
+                            <button type="submit">
+                                Join community
+                            </button>
 
-<input
-type="hidden"
-name="community_id"
-value="<?= (int) $community['id'] ?>"
->
+                        </form>
 
-<input
-type="hidden"
-name="action"
-value="join"
->
+                    <?php else: ?>
 
-<button type="submit">
-Join
-</button>
+                        <div class="meta">
+                            You are the owner of this community.
+                        </div>
 
-</form>
+                    <?php endif; ?>
 
-<form
-action="backend/community_action.php"
-method="POST"
->
+                </div>
 
-<input
-type="hidden"
-name="community_id"
-value="<?= (int) $community['id'] ?>"
->
+            <?php endforeach; ?>
 
-<input
-type="hidden"
-name="action"
-value="leave"
->
+        <?php endif; ?>
 
-<button
-type="submit"
-class="secondary"
->
-Leave
-</button>
-
-</form>
-
-</div>
-
-</div>
-
-<?php endforeach; ?>
-
-</div>
-
-<?php endif; ?>
-
-</main>
+    </div>
 
 </div>
 
 </body>
-
 </html>
