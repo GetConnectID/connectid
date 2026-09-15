@@ -2,457 +2,317 @@
 
 require_once __DIR__ . '/backend/auth.php';
 require_once __DIR__ . '/backend/db.php';
+require_once __DIR__ . '/backend/csrf.php';
 
-$userId = $_SESSION['user_id'];
+$userId = (int) $_SESSION['user_id'];
 
-$username = trim($_GET['user'] ?? '');
-$username = ltrim($username, '@');
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+$selectedUsername = trim($_GET['user'] ?? '');
+$selectedUsername = ltrim($selectedUsername, '@');
 
 $selectedUser = null;
 $messages = [];
 
-if ($username !== '') {
+if ($selectedUsername !== '') {
 
-    $stmt = $pdo->prepare(
-        'SELECT id, username, display_name, avatar, role, reputation
-         FROM users
-         WHERE username = :username
-         LIMIT 1'
-    );
+    $userStmt = $pdo->prepare("
+        SELECT
+            id,
+            username,
+            display_name,
+            role,
+            reputation
+        FROM users
+        WHERE username = :username
+          AND status = 'active'
+        LIMIT 1
+    ");
 
-    $stmt->execute([
-        'username' => strtolower($username)
+    $userStmt->execute([
+        ':username' => $selectedUsername
     ]);
 
-    $selectedUser = $stmt->fetch();
+    $selectedUser = $userStmt->fetch();
 
     if ($selectedUser) {
 
-        $connection = $pdo->prepare(
-            'SELECT id
-             FROM connections
-             WHERE status = "accepted"
-             AND (
-                (requester_id = :user_id AND receiver_id = :other_user_id)
+        $connectionStmt = $pdo->prepare("
+            SELECT id
+            FROM connections
+            WHERE
+                (
+                    requester_id = :user_a
+                    AND receiver_id = :user_b
+                )
                 OR
-                (requester_id = :other_user_id AND receiver_id = :user_id)
-             )
-             LIMIT 1'
-        );
+                (
+                    requester_id = :user_b2
+                    AND receiver_id = :user_a2
+                )
+            AND status = 'accepted'
+            LIMIT 1
+        ");
 
-        $connection->execute([
-            'user_id' => $userId,
-            'other_user_id' => $selectedUser['id']
+        $connectionStmt->execute([
+            ':user_a' => $userId,
+            ':user_b' => $selectedUser['id'],
+            ':user_b2' => $userId,
+            ':user_a2' => $selectedUser['id']
         ]);
 
-        if ($connection->fetch()) {
+        $connection = $connectionStmt->fetch();
 
-            $stmt = $pdo->prepare(
-                'SELECT
+        if ($connection) {
+
+            $messageStmt = $pdo->prepare("
+                SELECT
                     id,
                     sender_id,
                     receiver_id,
                     message,
-                    created_at
-                 FROM messages
-                 WHERE
-                    (sender_id = :user_id AND receiver_id = :other_user_id)
+                    created_at,
+                    read_at
+                FROM messages
+                WHERE
+                    (
+                        sender_id = :user_a
+                        AND receiver_id = :user_b
+                    )
                     OR
-                    (sender_id = :other_user_id AND receiver_id = :user_id)
-                 ORDER BY created_at ASC'
-            );
+                    (
+                        sender_id = :user_b2
+                        AND receiver_id = :user_a2
+                    )
+                ORDER BY created_at ASC
+            ");
 
-            $stmt->execute([
-                'user_id' => $userId,
-                'other_user_id' => $selectedUser['id']
+            $messageStmt->execute([
+                ':user_a' => $userId,
+                ':user_b' => $selectedUser['id'],
+                ':user_b2' => $selectedUser['id'],
+                ':user_a2' => $userId
             ]);
 
-            $messages = $stmt->fetchAll();
+            $messages = $messageStmt->fetchAll();
         }
     }
 }
 
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConnectID Messages</title>
 
-<title>Messages - ConnectID</title>
+    <style>
 
-<style>
+        * {
+            box-sizing: border-box;
+        }
 
-* {
-    box-sizing: border-box;
-}
+        body {
+            margin: 0;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
 
-body {
-    margin: 0;
-    background: #050505;
-    color: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
-}
+        nav {
+            padding: 20px;
+            border-bottom: 1px solid #222;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
 
-.layout {
-    min-height: 100vh;
-    display: flex;
-}
+        nav a {
+            color: #fff;
+            text-decoration: none;
+        }
 
-.sidebar {
-    width: 240px;
-    background: #0d0d0d;
-    border-right: 1px solid #222222;
-    padding: 28px 18px;
-}
+        nav a:hover {
+            color: #ff6a00;
+        }
 
-.logo {
-    font-size: 25px;
-    font-weight: 700;
-    padding: 0 12px;
-    margin-bottom: 40px;
-}
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+        }
 
-.logo span {
-    color: #ff7a00;
-}
+        .card {
+            background: #0b0b0b;
+            border: 1px solid #222;
+            border-radius: 16px;
+            padding: 25px;
+        }
 
-.nav a {
-    display: block;
-    padding: 13px 12px;
-    margin-bottom: 5px;
-    border-radius: 9px;
-    color: #999999;
-    text-decoration: none;
-}
+        h1 {
+            margin-top: 0;
+        }
 
-.nav a:hover,
-.nav a.active {
-    background: #1a1a1a;
-    color: #ffffff;
-}
+        .username {
+            color: #888;
+        }
 
-.main {
-    flex: 1;
-    display: flex;
-    height: 100vh;
-}
+        .conversation {
+            margin-top: 30px;
+        }
 
-.conversations {
-    width: 320px;
-    border-right: 1px solid #222222;
-    padding: 25px;
-    overflow-y: auto;
-}
+        .message {
+            padding: 12px 15px;
+            margin: 10px 0;
+            border-radius: 12px;
+            max-width: 75%;
+            background: #151515;
+        }
 
-.conversations h1 {
-    font-size: 25px;
-    margin-top: 0;
-}
+        .mine {
+            margin-left: auto;
+            border: 1px solid #ff6a00;
+        }
 
-.search {
-    width: 100%;
-    padding: 12px;
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 9px;
-    color: #ffffff;
-}
+        .theirs {
+            margin-right: auto;
+        }
 
-.conversation {
-    display: block;
-    padding: 16px;
-    margin-top: 12px;
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 12px;
-    color: #ffffff;
-    text-decoration: none;
-}
+        .time {
+            color: #666;
+            font-size: 11px;
+            margin-top: 5px;
+        }
 
-.conversation:hover {
-    border-color: #444444;
-}
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            margin-top: 20px;
+            padding: 15px;
+            background: #111;
+            color: #fff;
+            border: 1px solid #333;
+            border-radius: 10px;
+            resize: vertical;
+        }
 
-.username {
-    color: #888888;
-    font-size: 13px;
-    margin-top: 4px;
-}
+        button {
+            margin-top: 10px;
+            padding: 12px 22px;
+            background: #ff6a00;
+            color: #000;
+            border: 0;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
 
-.chat {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
+        .empty {
+            color: #777;
+            margin-top: 20px;
+        }
 
-.chat-header {
-    padding: 24px;
-    border-bottom: 1px solid #222222;
-}
-
-.chat-header h2 {
-    margin: 0;
-}
-
-.chat-header span {
-    color: #888888;
-    font-size: 14px;
-}
-
-.messages {
-    flex: 1;
-    padding: 25px;
-    overflow-y: auto;
-}
-
-.empty {
-    color: #666666;
-    text-align: center;
-    margin-top: 80px;
-}
-
-.message {
-    max-width: 65%;
-    padding: 12px 15px;
-    margin-bottom: 12px;
-    border-radius: 14px;
-    background: #151515;
-}
-
-.message.mine {
-    margin-left: auto;
-    background: #ff7a00;
-}
-
-.message-text {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.message-time {
-    margin-top: 6px;
-    font-size: 10px;
-    opacity: 0.65;
-}
-
-.composer {
-    padding: 20px;
-    border-top: 1px solid #222222;
-}
-
-.composer form {
-    display: flex;
-    gap: 10px;
-}
-
-.composer input {
-    flex: 1;
-    padding: 14px;
-    background: #111111;
-    border: 1px solid #333333;
-    border-radius: 10px;
-    color: #ffffff;
-}
-
-.composer button {
-    padding: 14px 22px;
-    border: 0;
-    border-radius: 10px;
-    background: #ff7a00;
-    color: #ffffff;
-    font-weight: 700;
-}
-
-@media (max-width: 800px) {
-
-    .layout {
-        display: block;
-    }
-
-    .sidebar {
-        width: 100%;
-        border-right: 0;
-        border-bottom: 1px solid #222222;
-    }
-
-    .main {
-        height: calc(100vh - 170px);
-    }
-
-    .conversations {
-        display: none;
-    }
-
-    .message {
-        max-width: 85%;
-    }
-}
-
-</style>
-
+    </style>
 </head>
 
 <body>
 
-<div class="layout">
-
-<aside class="sidebar">
-
-<div class="logo">
-Connect<span>ID</span>
-</div>
-
-<nav class="nav">
-
-<a href="home.php">Home</a>
-
-<a href="messages.php" class="active">Messages</a>
-
-<a href="connections.php">Connections</a>
-
-<a href="communities.html">Communities</a>
-
-<a href="profile.php">Profile</a>
-
-<a href="backend/logout.php">Sign out</a>
-
+<nav>
+    <a href="home.php">Home</a>
+    <a href="profile.php">Profile</a>
+    <a href="connections.php">Connections</a>
+    <a href="messages.php">Messages</a>
+    <a href="communities.php">Communities</a>
+    <a href="backend/logout.php">Logout</a>
 </nav>
 
-</aside>
+<div class="container">
 
-<main class="main">
+    <div class="card">
 
-<section class="conversations">
+        <?php if (!$selectedUser): ?>
 
-<h1>Messages</h1>
+            <h1>Messages</h1>
 
-<input
-class="search"
-placeholder="Search connections"
->
+            <p class="empty">
+                Select a connected Citizen to start a conversation.
+            </p>
 
-<?php if ($selectedUser): ?>
+        <?php else: ?>
 
-<a
-class="conversation"
-href="messages.php?user=<?= urlencode($selectedUser['username']) ?>"
->
+            <h1>
+                <?= e($selectedUser['display_name']) ?>
+            </h1>
 
-<strong>
-<?= htmlspecialchars($selectedUser['display_name']) ?>
-</strong>
+            <div class="username">
+                @<?= e($selectedUser['username']) ?>
+            </div>
 
-<div class="username">
-@<?= htmlspecialchars($selectedUser['username']) ?>
-</div>
+            <div class="conversation">
 
-</a>
+                <?php if (!$messages): ?>
 
-<?php else: ?>
+                    <div class="empty">
+                        No messages yet. Start the conversation.
+                    </div>
 
-<div class="empty">
-Select a connection to start messaging.
-</div>
+                <?php else: ?>
 
-<?php endif; ?>
+                    <?php foreach ($messages as $message): ?>
 
-</section>
+                        <div class="message <?= ((int) $message['sender_id'] === $userId) ? 'mine' : 'theirs' ?>">
 
-<section class="chat">
+                            <?= nl2br(e($message['message'])) ?>
 
-<?php if ($selectedUser): ?>
+                            <div class="time">
+                                <?= e($message['created_at']) ?>
+                            </div>
 
-<header class="chat-header">
+                        </div>
 
-<h2>
-<?= htmlspecialchars($selectedUser['display_name']) ?>
-</h2>
+                    <?php endforeach; ?>
 
-<span>
-@<?= htmlspecialchars($selectedUser['username']) ?>
-</span>
+                <?php endif; ?>
 
-</header>
+            </div>
 
-<div class="messages">
+            <form method="POST" action="backend/send_message.php">
 
-<?php if (!$messages): ?>
+                <input
+                    type="hidden"
+                    name="receiver_username"
+                    value="<?= e($selectedUser['username']) ?>"
+                >
 
-<div class="empty">
-No messages yet.
-Start the conversation below.
-</div>
+                <input
+                    type="hidden"
+                    name="csrf_token"
+                    value="<?= e(csrfToken()) ?>"
+                >
 
-<?php else: ?>
+                <textarea
+                    name="message"
+                    maxlength="5000"
+                    placeholder="Write a message..."
+                    required
+                ></textarea>
 
-<?php foreach ($messages as $message): ?>
+                <button type="submit">
+                    Send message
+                </button>
 
-<div class="message <?= ((int) $message['sender_id'] === (int) $userId) ? 'mine' : '' ?>">
+            </form>
 
-<div class="message-text">
-<?= htmlspecialchars($message['message']) ?>
-</div>
+        <?php endif; ?>
 
-<div class="message-time">
-<?= htmlspecialchars($message['created_at']) ?>
-</div>
-
-</div>
-
-<?php endforeach; ?>
-
-<?php endif; ?>
-
-</div>
-
-<div class="composer">
-
-<form action="backend/send_message.php" method="POST">
-
-<input
-type="hidden"
-name="username"
-value="<?= htmlspecialchars($selectedUser['username']) ?>"
->
-
-<input
-type="text"
-name="message"
-placeholder="Write a message..."
-maxlength="5000"
-required
->
-
-<button type="submit">
-Send
-</button>
-
-</form>
-
-</div>
-
-<?php else: ?>
-
-<div class="chat">
-
-<div class="empty">
-Your private messages will appear here.
-</div>
-
-</div>
-
-<?php endif; ?>
-
-</section>
-
-</main>
+    </div>
 
 </div>
 
 </body>
-
 </html>
