@@ -2,358 +2,217 @@
 
 require_once __DIR__ . '/backend/auth.php';
 require_once __DIR__ . '/backend/db.php';
+require_once __DIR__ . '/backend/csrf.php';
 
-$userId = $_SESSION['user_id'];
+$userId = (int) $_SESSION['user_id'];
 
-$stmt = $pdo->prepare(
-    'SELECT
+$stmt = $pdo->prepare("
+    SELECT
         c.id,
         c.status,
         c.requester_id,
         c.receiver_id,
         u.username,
         u.display_name,
-        u.avatar,
         u.role,
         u.reputation
-     FROM connections c
-     JOIN users u
-       ON (
-            CASE
-                WHEN c.requester_id = :user_id THEN u.id = c.receiver_id
-                ELSE u.id = c.requester_id
-            END
-          )
-     WHERE
-        c.requester_id = :user_id_2
-        OR c.receiver_id = :user_id_3
-     ORDER BY c.created_at DESC'
-);
+    FROM connections c
+    JOIN users u
+        ON u.id = IF(c.requester_id = :user_id, c.receiver_id, c.requester_id)
+    WHERE c.requester_id = :requester
+       OR c.receiver_id = :receiver
+    ORDER BY c.created_at DESC
+");
 
 $stmt->execute([
-    'user_id' => $userId,
-    'user_id_2' => $userId,
-    'user_id_3' => $userId
+    ':user_id' => $userId,
+    ':requester' => $userId,
+    ':receiver' => $userId
 ]);
 
 $connections = $stmt->fetchAll();
 
-?>
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
 
+?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConnectID Connections</title>
 
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {
+            box-sizing: border-box;
+        }
 
-<title>Connections - ConnectID</title>
+        body {
+            margin: 0;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
 
-<style>
+        nav {
+            padding: 20px;
+            border-bottom: 1px solid #222;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
 
-* {
-    box-sizing: border-box;
-}
+        nav a {
+            color: #fff;
+            text-decoration: none;
+        }
 
-body {
-    margin: 0;
-    background: #050505;
-    color: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
-}
+        nav a:hover {
+            color: #ff6a00;
+        }
 
-.layout {
-    min-height: 100vh;
-    display: flex;
-}
+        .container {
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+        }
 
-.sidebar {
-    width: 240px;
-    background: #0d0d0d;
-    border-right: 1px solid #222222;
-    padding: 28px 18px;
-}
+        .card {
+            background: #0b0b0b;
+            border: 1px solid #222;
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 25px;
+        }
 
-.logo {
-    font-size: 25px;
-    font-weight: 700;
-    padding: 0 12px;
-    margin-bottom: 40px;
-}
+        h1 {
+            margin-top: 0;
+        }
 
-.logo span {
-    color: #ff7a00;
-}
+        input {
+            width: 100%;
+            padding: 14px;
+            margin: 10px 0;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+        }
 
-.nav a {
-    display: block;
-    padding: 13px 12px;
-    margin-bottom: 5px;
-    border-radius: 9px;
-    color: #999999;
-    text-decoration: none;
-}
+        button {
+            padding: 12px 20px;
+            border: 0;
+            border-radius: 8px;
+            background: #ff6a00;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+        }
 
-.nav a:hover,
-.nav a.active {
-    background: #1a1a1a;
-    color: #ffffff;
-}
+        .connection {
+            padding: 18px 0;
+            border-bottom: 1px solid #222;
+        }
 
-.main {
-    flex: 1;
-    max-width: 1000px;
-    padding: 50px;
-}
+        .username {
+            color: #888;
+        }
 
-h1 {
-    margin: 0 0 8px;
-    font-size: 34px;
-}
+        .status {
+            color: #ff6a00;
+            font-size: 13px;
+            margin-top: 5px;
+        }
 
-.subtitle {
-    color: #888888;
-    margin-bottom: 30px;
-}
-
-.search {
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 16px;
-    padding: 25px;
-    margin-bottom: 25px;
-}
-
-.search form {
-    display: flex;
-    gap: 12px;
-}
-
-input {
-    flex: 1;
-    padding: 14px;
-    background: #080808;
-    border: 1px solid #333333;
-    border-radius: 9px;
-    color: #ffffff;
-    font-size: 15px;
-}
-
-button {
-    border: 0;
-    border-radius: 9px;
-    padding: 14px 20px;
-    background: #ff7a00;
-    color: #ffffff;
-    font-weight: 700;
-    cursor: pointer;
-}
-
-.connection {
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 16px;
-    padding: 22px;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.person {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-.avatar {
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: #222222;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #777777;
-    font-size: 11px;
-}
-
-.name {
-    font-weight: 700;
-    margin-bottom: 5px;
-}
-
-.username {
-    color: #888888;
-    font-size: 14px;
-}
-
-.status {
-    color: #ff7a00;
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.empty {
-    background: #111111;
-    border: 1px solid #292929;
-    border-radius: 16px;
-    padding: 35px;
-    color: #777777;
-}
-
-@media (max-width: 800px) {
-
-    .layout {
-        display: block;
-    }
-
-    .sidebar {
-        width: 100%;
-        border-right: 0;
-        border-bottom: 1px solid #222222;
-    }
-
-    .main {
-        padding: 25px 18px;
-    }
-
-    .search form {
-        flex-direction: column;
-    }
-
-    .connection {
-        align-items: flex-start;
-        gap: 15px;
-    }
-}
-
-</style>
-
+        .empty {
+            color: #777;
+        }
+    </style>
 </head>
 
 <body>
 
-<div class="layout">
-
-<aside class="sidebar">
-
-<div class="logo">
-Connect<span>ID</span>
-</div>
-
-<nav class="nav">
-
-<a href="home.php">Home</a>
-
-<a href="messages.php">Messages</a>
-
-<a href="connections.php" class="active">Connections</a>
-
-<a href="communities.html">Communities</a>
-
-<a href="profile.php">Profile</a>
-
-<a href="backend/logout.php">Sign out</a>
-
+<nav>
+    <a href="home.php">Home</a>
+    <a href="profile.php">Profile</a>
+    <a href="connections.php">Connections</a>
+    <a href="messages.php">Messages</a>
+    <a href="communities.php">Communities</a>
+    <a href="backend/logout.php">Logout</a>
 </nav>
 
-</aside>
+<div class="container">
 
-<main class="main">
+    <div class="card">
 
-<h1>Connections</h1>
+        <h1>Connections</h1>
 
-<div class="subtitle">
-Build trusted connections inside ConnectID.
-</div>
+        <p>Connect with another Citizen using their @username.</p>
 
-<div class="search">
+        <form method="POST" action="backend/connections.php">
 
-<form action="backend/connections.php" method="POST">
+            <input
+                type="text"
+                name="username"
+                placeholder="@username"
+                maxlength="30"
+                required
+            >
 
-<input
-type="text"
-name="username"
-placeholder="@username"
-required
->
+            <input
+                type="hidden"
+                name="csrf_token"
+                value="<?= e(csrfToken()) ?>"
+            >
 
-<input
-type="hidden"
-name="action"
-value="connect"
->
+            <button type="submit">
+                Connect
+            </button>
 
-<button type="submit">
-Connect
-</button>
+        </form>
 
-</form>
+    </div>
 
-</div>
+    <div class="card">
 
-<?php if (isset($_GET['sent'])): ?>
+        <h2>Your connections</h2>
 
-<div class="connection">
-<div class="status">
-Connection request sent.
-</div>
-</div>
+        <?php if (!$connections): ?>
 
-<?php endif; ?>
+            <div class="empty">
+                You do not have any connections yet.
+            </div>
 
-<?php if (!$connections): ?>
+        <?php else: ?>
 
-<div class="empty">
+            <?php foreach ($connections as $connection): ?>
 
-You don't have any connections yet.
+                <div class="connection">
 
-</div>
+                    <strong>
+                        <?= e($connection['display_name']) ?>
+                    </strong>
 
-<?php else: ?>
+                    <div class="username">
+                        @<?= e($connection['username']) ?>
+                    </div>
 
-<?php foreach ($connections as $connection): ?>
+                    <div class="status">
+                        <?= e(strtoupper($connection['status'])) ?>
+                    </div>
 
-<div class="connection">
+                </div>
 
-<div class="person">
+            <?php endforeach; ?>
 
-<div class="avatar">
-Avatar
-</div>
+        <?php endif; ?>
 
-<div>
-
-<div class="name">
-<?= htmlspecialchars($connection['display_name']) ?>
-</div>
-
-<div class="username">
-@<?= htmlspecialchars($connection['username']) ?>
-</div>
-
-</div>
-
-</div>
-
-<div class="status">
-
-<?= htmlspecialchars(strtoupper($connection['status'])) ?>
-
-</div>
-
-</div>
-
-<?php endforeach; ?>
-
-<?php endif; ?>
-
-</main>
+    </div>
 
 </div>
 
 </body>
-
 </html>
