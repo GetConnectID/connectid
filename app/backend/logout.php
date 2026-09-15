@@ -1,6 +1,6 @@
 <?php
 
-session_start();
+require_once __DIR__ . '/session.php';
 
 $_SESSION = [];
 
@@ -12,7 +12,7 @@ if (ini_get('session.use_cookies')) {
         '',
         time() - 42000,
         $params['path'],
-        $params['domain'],
+        $params['domain'] ?? '',
         $params['secure'],
         $params['httponly']
     );
