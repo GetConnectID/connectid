@@ -2,79 +2,109 @@
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/csrf.php';
 
-$userId = $_SESSION['user_id'];
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: ../messages.php');
+    exit;
+}
 
-$receiverUsername = trim($_POST['username'] ?? '');
-$message = trim($_POST['message'] ?? '');
+verifyCsrfToken($_POST['csrf_token'] ?? null);
 
+$userId = (int) $_SESSION['user_id'];
+
+$receiverUsername = trim($_POST['receiver_username'] ?? '');
 $receiverUsername = ltrim($receiverUsername, '@');
 
-if ($receiverUsername === '' || $message === '') {
-    exit('Username and message are required.');
+$message = trim($_POST['message'] ?? '');
+
+if (
+    $receiverUsername === '' ||
+    !preg_match('/^[A-Za-z0-9_]{3,30}$/', $receiverUsername)
+) {
+    header('Location: ../messages.php?error=invalid_user');
+    exit;
 }
 
-if (strlen($message) > 5000) {
-    exit('Message is too long.');
+if ($message === '' || strlen($message) > 5000) {
+    header('Location: ../messages.php?error=invalid_message');
+    exit;
 }
 
-$stmt = $pdo->prepare(
-    'SELECT id, status
-     FROM users
-     WHERE username = :username
-     LIMIT 1'
-);
+$stmt = $pdo->prepare("
+    SELECT id, username
+    FROM users
+    WHERE username = :username
+      AND status = 'active'
+    LIMIT 1
+");
 
 $stmt->execute([
-    'username' => strtolower($receiverUsername)
+    ':username' => $receiverUsername
 ]);
 
 $receiver = $stmt->fetch();
 
 if (!$receiver) {
-    exit('User not found.');
+    header('Location: ../messages.php?error=user_not_found');
+    exit;
 }
 
-if ((int) $receiver['id'] === (int) $userId) {
-    exit('You cannot send a message to yourself.');
+$receiverId = (int) $receiver['id'];
+
+if ($receiverId === $userId) {
+    header('Location: ../messages.php?error=self');
+    exit;
 }
 
-if ($receiver['status'] !== 'active') {
-    exit('This user is not active.');
-}
-
-$connection = $pdo->prepare(
-    'SELECT id
-     FROM connections
-     WHERE status = "accepted"
-     AND (
-        (requester_id = :user_id AND receiver_id = :receiver_id)
+$connectionStmt = $pdo->prepare("
+    SELECT id
+    FROM connections
+    WHERE
+        (
+            requester_id = :user_a
+            AND receiver_id = :user_b
+        )
         OR
-        (requester_id = :receiver_id AND receiver_id = :user_id)
-     )
-     LIMIT 1'
-);
+        (
+            requester_id = :user_b2
+            AND receiver_id = :user_a2
+        )
+    AND status = 'accepted'
+    LIMIT 1
+");
 
-$connection->execute([
-    'user_id' => $userId,
-    'receiver_id' => $receiver['id']
+$connectionStmt->execute([
+    ':user_a' => $userId,
+    ':user_b' => $receiverId,
+    ':user_b2' => $userId,
+    ':user_a2' => $receiverId
 ]);
 
-if (!$connection->fetch()) {
-    exit('You can only message an accepted connection.');
+if (!$connectionStmt->fetch()) {
+    header('Location: ../connections.php?error=not_connected');
+    exit;
 }
 
-$insert = $pdo->prepare(
-    'INSERT INTO messages
-     (sender_id, receiver_id, message)
-     VALUES
-     (:sender_id, :receiver_id, :message)'
-);
+$insert = $pdo->prepare("
+    INSERT INTO messages
+    (
+        sender_id,
+        receiver_id,
+        message
+    )
+    VALUES
+    (
+        :sender_id,
+        :receiver_id,
+        :message
+    )
+");
 
 $insert->execute([
-    'sender_id' => $userId,
-    'receiver_id' => $receiver['id'],
-    'message' => $message
+    ':sender_id' => $userId,
+    ':receiver_id' => $receiverId,
+    ':message' => $message
 ]);
 
 header(
