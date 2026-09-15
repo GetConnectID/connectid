@@ -2,83 +2,104 @@
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/csrf.php';
 
-$userId = $_SESSION['user_id'];
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: ../communities.php');
+    exit;
+}
+
+verifyCsrfToken($_POST['csrf_token'] ?? null);
+
+$userId = (int) $_SESSION['user_id'];
 
 $communityId = (int) ($_POST['community_id'] ?? 0);
 $action = $_POST['action'] ?? '';
 
 if ($communityId <= 0) {
-    exit('Invalid community.');
+    header('Location: ../communities.php?error=invalid_community');
+    exit;
 }
 
 if (!in_array($action, ['join', 'leave'], true)) {
-    exit('Invalid action.');
+    header('Location: ../communities.php?error=invalid_action');
+    exit;
 }
 
-$stmt = $pdo->prepare(
-    'SELECT id, creator_id, status
-     FROM communities
-     WHERE id = :id
-     LIMIT 1'
-);
+$communityStmt = $pdo->prepare("
+    SELECT id, creator_id
+    FROM communities
+    WHERE id = :id
+      AND status = 'active'
+    LIMIT 1
+");
 
-$stmt->execute([
-    'id' => $communityId
+$communityStmt->execute([
+    ':id' => $communityId
 ]);
 
-$community = $stmt->fetch();
+$community = $communityStmt->fetch();
 
-if (!$community || $community['status'] !== 'active') {
-    exit('Community not found.');
+if (!$community) {
+    header('Location: ../communities.php?error=community_not_found');
+    exit;
 }
 
 if ($action === 'join') {
 
-    $check = $pdo->prepare(
-        'SELECT id
-         FROM community_members
-         WHERE community_id = :community_id
-         AND user_id = :user_id
-         LIMIT 1'
-    );
+    $existing = $pdo->prepare("
+        SELECT id
+        FROM community_members
+        WHERE community_id = :community_id
+          AND user_id = :user_id
+        LIMIT 1
+    ");
 
-    $check->execute([
-        'community_id' => $communityId,
-        'user_id' => $userId
+    $existing->execute([
+        ':community_id' => $communityId,
+        ':user_id' => $userId
     ]);
 
-    if (!$check->fetch()) {
+    if (!$existing->fetch()) {
 
-        $insert = $pdo->prepare(
-            'INSERT INTO community_members
-             (community_id, user_id, role)
-             VALUES
-             (:community_id, :user_id, :role)'
-        );
+        $insert = $pdo->prepare("
+            INSERT INTO community_members
+            (
+                community_id,
+                user_id,
+                role
+            )
+            VALUES
+            (
+                :community_id,
+                :user_id,
+                'member'
+            )
+        ");
 
         $insert->execute([
-            'community_id' => $communityId,
-            'user_id' => $userId,
-            'role' => 'member'
+            ':community_id' => $communityId,
+            ':user_id' => $userId
         ]);
     }
 
 } elseif ($action === 'leave') {
 
-    if ((int) $community['creator_id'] !== (int) $userId) {
-
-        $delete = $pdo->prepare(
-            'DELETE FROM community_members
-             WHERE community_id = :community_id
-             AND user_id = :user_id'
-        );
-
-        $delete->execute([
-            'community_id' => $communityId,
-            'user_id' => $userId
-        ]);
+    if ((int) $community['creator_id'] === $userId) {
+        header('Location: ../communities.php?error=owner_cannot_leave');
+        exit;
     }
+
+    $delete = $pdo->prepare("
+        DELETE FROM community_members
+        WHERE community_id = :community_id
+          AND user_id = :user_id
+    ");
+
+    $delete->execute([
+        ':community_id' => $communityId,
+        ':user_id' => $userId
+    ]);
 }
 
 header('Location: ../communities.php');
