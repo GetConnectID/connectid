@@ -5,16 +5,24 @@ function tooManyLoginAttempts(PDO $pdo, string $username, string $ipAddress): bo
     $windowMinutes = 15;
     $maxAttempts = 5;
 
+    $cutoff = date(
+        'Y-m-d H:i:s',
+        time() - ($windowMinutes * 60)
+    );
+
     $stmt = $pdo->prepare("
         SELECT COUNT(*)
         FROM login_attempts
         WHERE successful = 0
-        AND created_at >= (NOW() - INTERVAL :minutes MINUTE)
-        AND (username = :username OR ip_address = :ip_address)
+        AND created_at >= :cutoff
+        AND (
+            username = :username
+            OR ip_address = :ip_address
+        )
     ");
 
     $stmt->execute([
-        ':minutes' => $windowMinutes,
+        ':cutoff' => $cutoff,
         ':username' => $username,
         ':ip_address' => $ipAddress
     ]);
