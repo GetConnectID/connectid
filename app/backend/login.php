@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/session.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/rate_limit.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ../login.html');
@@ -13,6 +14,13 @@ $password = $_POST['password'] ?? '';
 
 if ($username === '' || $password === '') {
     header('Location: ../login.html?error=missing');
+    exit;
+}
+
+$ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+
+if (tooManyLoginAttempts($pdo, $username, $ipAddress)) {
+    header('Location: ../login.html?error=ratelimit');
     exit;
 }
 
@@ -39,13 +47,35 @@ $stmt->execute([
 
 $user = $stmt->fetch();
 
-if (!$user || !password_verify($password, $user['password_hash'])) {
-    header('Location: ../login.html?error=invalid');
-    exit;
-}
+$successful = (
+    $user &&
+    password_verify($password, $user['password_hash']) &&
+    $user['status'] === 'active'
+);
 
-if ($user['status'] !== 'active') {
-    header('Location: ../login.html?error=inactive');
+$attempt = $pdo->prepare("
+    INSERT INTO login_attempts
+    (
+        username,
+        ip_address,
+        successful
+    )
+    VALUES
+    (
+        :username,
+        :ip_address,
+        :successful
+    )
+");
+
+$attempt->execute([
+    ':username' => $username !== '' ? $username : null,
+    ':ip_address' => $ipAddress,
+    ':successful' => $successful ? 1 : 0
+]);
+
+if (!$user || !$successful) {
+    header('Location: ../login.html?error=invalid');
     exit;
 }
 
