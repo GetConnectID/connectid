@@ -3,87 +3,155 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db.php';
 
-$userId = $_SESSION['user_id'];
+header('Content-Type: application/json; charset=utf-8');
 
-$username = trim($_GET['user'] ?? '');
-$username = ltrim($username, '@');
+$userId = (int) $_SESSION['user_id'];
 
-if ($username === '') {
-    exit('User is required.');
+$targetUsername = trim($_GET['user'] ?? '');
+$afterId = max(0, (int) ($_GET['after_id'] ?? 0));
+
+if ($targetUsername === '') {
+    http_response_code(400);
+
+    echo json_encode([
+        'success' => false,
+        'messages' => []
+    ]);
+
+    exit;
 }
 
-$stmt = $pdo->prepare(
-    'SELECT id
-     FROM users
-     WHERE username = :username
-     LIMIT 1'
-);
+/*
+|--------------------------------------------------------------------------
+| Find target user
+|--------------------------------------------------------------------------
+*/
+
+$stmt = $pdo->prepare("
+    SELECT
+        id,
+        username,
+        display_name
+    FROM users
+    WHERE username = :username
+    AND status = 'active'
+    LIMIT 1
+");
 
 $stmt->execute([
-    'username' => strtolower($username)
+    ':username' => $targetUsername
 ]);
 
-$otherUser = $stmt->fetch();
+$targetUser = $stmt->fetch();
 
-if (!$otherUser) {
-    exit('User not found.');
+if (!$targetUser) {
+    http_response_code(404);
+
+    echo json_encode([
+        'success' => false,
+        'messages' => []
+    ]);
+
+    exit;
 }
 
-$otherUserId = (int) $otherUser['id'];
+$targetUserId = (int) $targetUser['id'];
 
-$connection = $pdo->prepare(
-    'SELECT id
-     FROM connections
-     WHERE status = "accepted"
-     AND (
-        (requester_id = :user_id AND receiver_id = :other_user_id)
+/*
+|--------------------------------------------------------------------------
+| Verify accepted connection
+|--------------------------------------------------------------------------
+*/
+
+$connection = $pdo->prepare("
+    SELECT id
+    FROM connections
+    WHERE status = 'accepted'
+    AND (
+        (requester_id = :user_id AND receiver_id = :target_id)
         OR
-        (requester_id = :other_user_id AND receiver_id = :user_id)
-     )
-     LIMIT 1'
-);
+        (requester_id = :target_id AND receiver_id = :user_id)
+    )
+    LIMIT 1
+");
 
 $connection->execute([
-    'user_id' => $userId,
-    'other_user_id' => $otherUserId
+    ':user_id' => $userId,
+    ':target_id' => $targetUserId
 ]);
 
 if (!$connection->fetch()) {
+
     http_response_code(403);
-    exit('You are not connected with this user.');
+
+    echo json_encode([
+        'success' => false,
+        'messages' => []
+    ]);
+
+    exit;
 }
 
-$stmt = $pdo->prepare(
-    'SELECT
-        id,
-        sender_id,
-        receiver_id,
-        message,
-        created_at,
-        read_at
-     FROM messages
-     WHERE
-        (sender_id = :user_id AND receiver_id = :other_user_id)
+/*
+|--------------------------------------------------------------------------
+| Load messages after requested ID
+|--------------------------------------------------------------------------
+*/
+
+$stmt = $pdo->prepare("
+    SELECT
+        m.id,
+        m.sender_id,
+        m.receiver_id,
+        m.message,
+        m.created_at
+    FROM messages m
+    WHERE
+    (
+        (
+            m.sender_id = :user_id
+            AND m.receiver_id = :target_id
+        )
         OR
-        (sender_id = :other_user_id AND receiver_id = :user_id)
-     ORDER BY created_at ASC'
-);
+        (
+            m.sender_id = :target_id
+            AND m.receiver_id = :user_id
+        )
+    )
+    AND m.id > :after_id
+    ORDER BY m.id ASC
+    LIMIT 100
+");
 
 $stmt->execute([
-    'user_id' => $userId,
-    'other_user_id' => $otherUserId
+    ':user_id' => $userId,
+    ':target_id' => $targetUserId,
+    ':after_id' => $afterId
 ]);
 
 $messages = $stmt->fetchAll();
 
+/*
+|--------------------------------------------------------------------------
+| Escape message content for safe HTML insertion
+|--------------------------------------------------------------------------
+*/
+
 foreach ($messages as &$message) {
-    $message['message'] = htmlspecialchars(
-        $message['message'],
-        ENT_QUOTES,
-        'UTF-8'
+    $message['message'] = nl2br(
+        htmlspecialchars(
+            $message['message'],
+            ENT_QUOTES,
+            'UTF-8'
+        )
     );
 }
 
-header('Content-Type: application/json');
+unset($message);
 
-echo json_encode($messages);
+echo json_encode([
+    'success' => true,
+    'messages' => $messages
+], JSON_UNESCAPED_UNICODE);
+
+exit;
