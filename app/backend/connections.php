@@ -1,305 +1,187 @@
 <?php
 
-require_once __DIR__ . '/backend/auth.php';
-require_once __DIR__ . '/backend/db.php';
-require_once __DIR__ . '/backend/csrf.php';
+require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/csrf.php';
+require_once __DIR__ . '/notification_service.php';
 
-$currentUserId = (int) $_SESSION['user_id'];
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: ../connections.php');
+    exit;
+}
+
+verifyCsrfToken($_POST['csrf_token'] ?? null);
+
+$userId = (int) $_SESSION['user_id'];
+
+$username = trim($_POST['username'] ?? '');
+
+$username = ltrim($username, '@');
+
+if ($username === '' || strlen($username) > 30) {
+    header('Location: ../connections.php?error=invalid_username');
+    exit;
+}
+
+if (!preg_match('/^[A-Za-z0-9_]+$/', $username)) {
+    header('Location: ../connections.php?error=invalid_username');
+    exit;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Find target user
+|--------------------------------------------------------------------------
+*/
 
 $stmt = $pdo->prepare("
     SELECT
-        c.id,
-        c.status,
-        c.created_at,
-        u.username,
-        u.display_name,
-        u.avatar
-    FROM connections c
-    JOIN users u ON u.id = c.requester_id
-    WHERE c.receiver_id = :user_id
-    AND c.status = 'pending'
-    ORDER BY c.created_at DESC
+        id,
+        username,
+        display_name,
+        status
+    FROM users
+    WHERE username = :username
+    LIMIT 1
 ");
 
 $stmt->execute([
-    ':user_id' => $currentUserId
+    ':username' => $username
 ]);
 
-$incomingRequests = $stmt->fetchAll();
+$targetUser = $stmt->fetch();
 
-$stmt = $pdo->prepare("
+if (!$targetUser || $targetUser['status'] !== 'active') {
+    header('Location: ../connections.php?error=user_not_found');
+    exit;
+}
+
+$targetUserId = (int) $targetUser['id'];
+
+if ($targetUserId === $userId) {
+    header('Location: ../connections.php?error=self');
+    exit;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Check existing connection
+|--------------------------------------------------------------------------
+*/
+
+$existing = $pdo->prepare("
     SELECT
-        u.username,
-        u.display_name,
-        u.avatar
-    FROM connections c
-    JOIN users u
-        ON u.id = CASE
-            WHEN c.requester_id = :user_id THEN c.receiver_id
-            ELSE c.requester_id
-        END
-    WHERE (c.requester_id = :user_id OR c.receiver_id = :user_id)
-    AND c.status = 'accepted'
-    ORDER BY u.display_name ASC
+        id,
+        status
+    FROM connections
+    WHERE
+        (
+            requester_id = :user_id
+            AND receiver_id = :target_id
+        )
+        OR
+        (
+            requester_id = :target_id
+            AND receiver_id = :user_id
+        )
+    LIMIT 1
 ");
 
-$stmt->execute([
-    ':user_id' => $currentUserId
+$existing->execute([
+    ':user_id' => $userId,
+    ':target_id' => $targetUserId
 ]);
 
-$connections = $stmt->fetchAll();
+$connection = $existing->fetch();
 
-$csrfToken = csrfToken();
-?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Connections | ConnectID</title>
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #0b0b0b;
-            color: #ffffff;
-        }
+if ($connection) {
 
-        nav {
-            padding: 18px 24px;
-            border-bottom: 1px solid #222;
-        }
+    if ($connection['status'] === 'accepted') {
+        header('Location: ../connections.php?error=already_connected');
+        exit;
+    }
 
-        nav a {
-            color: #ffffff;
-            text-decoration: none;
-            margin-right: 20px;
-        }
+    if ($connection['status'] === 'pending') {
+        header('Location: ../connections.php?error=already_pending');
+        exit;
+    }
 
-        .container {
-            max-width: 900px;
-            margin: 40px auto;
-            padding: 0 20px;
-        }
+    if ($connection['status'] === 'declined') {
 
-        .card {
-            background: #151515;
-            border: 1px solid #292929;
-            border-radius: 14px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
+        $update = $pdo->prepare("
+            UPDATE connections
+            SET
+                requester_id = :user_id,
+                receiver_id = :target_id,
+                status = 'pending',
+                created_at = CURRENT_TIMESTAMP
+            WHERE id = :connection_id
+        ");
 
-        input {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 13px;
-            border-radius: 8px;
-            border: 1px solid #333;
-            background: #0d0d0d;
-            color: white;
-            margin-bottom: 10px;
-        }
+        $update->execute([
+            ':user_id' => $userId,
+            ':target_id' => $targetUserId,
+            ':connection_id' => (int) $connection['id']
+        ]);
 
-        button {
-            padding: 10px 16px;
-            border: 0;
-            border-radius: 8px;
-            cursor: pointer;
-        }
+        createNotification(
+            $pdo,
+            $targetUserId,
+            'connection_request',
+            'New connection request',
+            '@' . $_SESSION['username'] . ' wants to connect with you.',
+            'connection',
+            (int) $connection['id']
+        );
 
-        .primary {
-            background: #ff7a00;
-            color: white;
-        }
+        header('Location: ../connections.php?sent=1');
+        exit;
+    }
+}
 
-        .accept {
-            background: #ff7a00;
-            color: white;
-            margin-right: 8px;
-        }
+/*
+|--------------------------------------------------------------------------
+| Create new connection request
+|--------------------------------------------------------------------------
+*/
 
-        .decline {
-            background: #333;
-            color: white;
-        }
+$insert = $pdo->prepare("
+    INSERT INTO connections
+    (
+        requester_id,
+        receiver_id,
+        status
+    )
+    VALUES
+    (
+        :requester_id,
+        :receiver_id,
+        'pending'
+    )
+");
 
-        .person {
-            padding: 14px 0;
-            border-bottom: 1px solid #292929;
-        }
+$insert->execute([
+    ':requester_id' => $userId,
+    ':receiver_id' => $targetUserId
+]);
 
-        .person:last-child {
-            border-bottom: 0;
-        }
+$connectionId = (int) $pdo->lastInsertId();
 
-        .username {
-            color: #aaa;
-            margin-top: 4px;
-        }
+/*
+|--------------------------------------------------------------------------
+| Create notification
+|--------------------------------------------------------------------------
+*/
 
-        .empty {
-            color: #888;
-        }
-    </style>
-</head>
-<body>
+createNotification(
+    $pdo,
+    $targetUserId,
+    'connection_request',
+    'New connection request',
+    '@' . $_SESSION['username'] . ' wants to connect with you.',
+    'connection',
+    $connectionId
+);
 
-<nav>
-    <a href="home.php">Home</a>
-    <a href="profile.php">Profile</a>
-    <a href="connections.php">Connections</a>
-    <a href="messages.php">Messages</a>
-    <a href="communities.php">Communities</a>
-    <a href="backend/logout.php">Logout</a>
-</nav>
-
-<div class="container">
-
-    <h1>Connections</h1>
-
-    <div class="card">
-        <h2>Connect with a Citizen</h2>
-
-        <form method="post" action="backend/connections.php">
-            <input
-                type="text"
-                name="username"
-                placeholder="@username"
-                maxlength="30"
-                required
-            >
-
-            <input
-                type="hidden"
-                name="csrf_token"
-                value="<?= htmlspecialchars($csrfToken) ?>"
-            >
-
-            <button class="primary" type="submit">
-                Connect
-            </button>
-        </form>
-    </div>
-
-    <div class="card">
-        <h2>Incoming Requests</h2>
-
-        <?php if (!$incomingRequests): ?>
-
-            <p class="empty">No pending connection requests.</p>
-
-        <?php else: ?>
-
-            <?php foreach ($incomingRequests as $request): ?>
-
-                <div class="person">
-
-                    <strong>
-                        <?= htmlspecialchars($request['display_name']) ?>
-                    </strong>
-
-                    <div class="username">
-                        @<?= htmlspecialchars($request['username']) ?>
-                    </div>
-
-                    <br>
-
-                    <form
-                        method="post"
-                        action="backend/connection_action.php"
-                        style="display:inline;"
-                    >
-                        <input
-                            type="hidden"
-                            name="connection_id"
-                            value="<?= (int) $request['id'] ?>"
-                        >
-
-                        <input
-                            type="hidden"
-                            name="action"
-                            value="accept"
-                        >
-
-                        <input
-                            type="hidden"
-                            name="csrf_token"
-                            value="<?= htmlspecialchars($csrfToken) ?>"
-                        >
-
-                        <button class="accept" type="submit">
-                            Accept
-                        </button>
-                    </form>
-
-                    <form
-                        method="post"
-                        action="backend/connection_action.php"
-                        style="display:inline;"
-                    >
-                        <input
-                            type="hidden"
-                            name="connection_id"
-                            value="<?= (int) $request['id'] ?>"
-                        >
-
-                        <input
-                            type="hidden"
-                            name="action"
-                            value="decline"
-                        >
-
-                        <input
-                            type="hidden"
-                            name="csrf_token"
-                            value="<?= htmlspecialchars($csrfToken) ?>"
-                        >
-
-                        <button class="decline" type="submit">
-                            Decline
-                        </button>
-                    </form>
-
-                </div>
-
-            <?php endforeach; ?>
-
-        <?php endif; ?>
-    </div>
-
-    <div class="card">
-        <h2>Your Connections</h2>
-
-        <?php if (!$connections): ?>
-
-            <p class="empty">
-                You don't have any connections yet.
-            </p>
-
-        <?php else: ?>
-
-            <?php foreach ($connections as $connection): ?>
-
-                <div class="person">
-
-                    <strong>
-                        <?= htmlspecialchars($connection['display_name']) ?>
-                    </strong>
-
-                    <div class="username">
-                        @<?= htmlspecialchars($connection['username']) ?>
-                    </div>
-
-                </div>
-
-            <?php endforeach; ?>
-
-        <?php endif; ?>
-
-    </div>
-
-</div>
-
-</body>
-</html>
+header('Location: ../connections.php?sent=1');
+exit;
