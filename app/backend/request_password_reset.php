@@ -12,30 +12,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 verifyCsrfToken($_POST['csrf_token'] ?? null);
 
 $username = trim($_POST['username'] ?? '');
-$username = ltrim($username, '@');
 
-if (
-    $username === '' ||
-    strlen($username) > 30 ||
-    !preg_match('/^[A-Za-z0-9_]+$/', $username)
-) {
-    header('Location: ../forgot_password.php?error=invalid');
+if ($username === '') {
+    header('Location: ../forgot_password.php?error=missing');
     exit;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Find active user
-|--------------------------------------------------------------------------
-*/
-
 $stmt = $pdo->prepare("
-    SELECT
-        id,
-        username,
-        status
+    SELECT id
     FROM users
     WHERE username = :username
+    AND status = 'active'
     LIMIT 1
 ");
 
@@ -46,15 +33,10 @@ $stmt->execute([
 $user = $stmt->fetch();
 
 /*
-|--------------------------------------------------------------------------
-| Always return the same response
-|--------------------------------------------------------------------------
-|
-| This prevents username enumeration.
-|
-*/
-
-if (!$user || $user['status'] !== 'active') {
+ * Always return the same response when the account
+ * does not exist. This prevents username enumeration.
+ */
+if (!$user) {
     header('Location: ../forgot_password.php?sent=1');
     exit;
 }
@@ -62,43 +44,37 @@ if (!$user || $user['status'] !== 'active') {
 $userId = (int) $user['id'];
 
 /*
-|--------------------------------------------------------------------------
-| Remove older unused reset tokens
-|--------------------------------------------------------------------------
-*/
-
-$cleanup = $pdo->prepare("
+ * Remove previous unused reset tokens for this user.
+ * Only the newest reset request remains valid.
+ */
+$deleteOld = $pdo->prepare("
     DELETE FROM password_resets
     WHERE user_id = :user_id
-    AND (
-        used_at IS NOT NULL
-        OR expires_at < CURRENT_TIMESTAMP
-    )
+    AND used_at IS NULL
 ");
 
-$cleanup->execute([
+$deleteOld->execute([
     ':user_id' => $userId
 ]);
 
 /*
-|--------------------------------------------------------------------------
-| Generate secure reset token
-|--------------------------------------------------------------------------
-*/
+ * Remove expired or already-used tokens globally.
+ */
+$cleanup = $pdo->prepare("
+    DELETE FROM password_resets
+    WHERE used_at IS NOT NULL
+    OR expires_at < NOW()
+");
+
+$cleanup->execute();
 
 $token = bin2hex(random_bytes(32));
 $tokenHash = hash('sha256', $token);
 
 $expiresAt = date(
     'Y-m-d H:i:s',
-    time() + (60 * 30)
+    time() + (30 * 60)
 );
-
-/*
-|--------------------------------------------------------------------------
-| Store token hash
-|--------------------------------------------------------------------------
-*/
 
 $insert = $pdo->prepare("
     INSERT INTO password_resets
@@ -122,14 +98,9 @@ $insert->execute([
 ]);
 
 /*
-|--------------------------------------------------------------------------
-| Temporary development handling
-|--------------------------------------------------------------------------
-|
-| Email delivery will be connected before production launch.
-| The token itself is never stored in the database.
-|
-*/
+ * The token is intentionally not exposed here.
+ * Email delivery will be connected in a later step.
+ */
 
 header('Location: ../forgot_password.php?sent=1');
 exit;
