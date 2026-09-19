@@ -3,6 +3,7 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/csrf.php';
+require_once __DIR__ . '/notification_service.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ../connections.php');
@@ -12,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 verifyCsrfToken($_POST['csrf_token'] ?? null);
 
 $userId = (int) $_SESSION['user_id'];
+
 $connectionId = (int) ($_POST['connection_id'] ?? 0);
 $action = $_POST['action'] ?? '';
 
@@ -25,25 +27,90 @@ if (!in_array($action, ['accept', 'decline'], true)) {
     exit;
 }
 
-$newStatus = $action === 'accept'
-    ? 'accepted'
-    : 'declined';
+/*
+|--------------------------------------------------------------------------
+| Load pending request
+|--------------------------------------------------------------------------
+*/
 
 $stmt = $pdo->prepare("
-    UPDATE connections
-    SET
-        status = :status,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = :id
-      AND receiver_id = :receiver_id
-      AND status = 'pending'
+    SELECT
+        c.id,
+        c.requester_id,
+        c.receiver_id,
+        c.status,
+        u.username,
+        u.display_name
+    FROM connections c
+    JOIN users u
+        ON u.id = c.requester_id
+    WHERE c.id = :connection_id
+    AND c.receiver_id = :user_id
+    AND c.status = 'pending'
+    LIMIT 1
 ");
 
 $stmt->execute([
-    ':status' => $newStatus,
-    ':id' => $connectionId,
-    ':receiver_id' => $userId
+    ':connection_id' => $connectionId,
+    ':user_id' => $userId
 ]);
 
-header('Location: ../connections.php');
+$connection = $stmt->fetch();
+
+if (!$connection) {
+    header('Location: ../connections.php?error=connection_not_found');
+    exit;
+}
+
+$requesterId = (int) $connection['requester_id'];
+
+/*
+|--------------------------------------------------------------------------
+| Accept
+|--------------------------------------------------------------------------
+*/
+
+if ($action === 'accept') {
+
+    $update = $pdo->prepare("
+        UPDATE connections
+        SET status = 'accepted'
+        WHERE id = :connection_id
+    ");
+
+    $update->execute([
+        ':connection_id' => $connectionId
+    ]);
+
+    createNotification(
+        $pdo,
+        $requesterId,
+        'connection_accepted',
+        'Connection accepted',
+        '@' . $_SESSION['username'] . ' accepted your connection request.',
+        'connection',
+        $connectionId
+    );
+
+    header('Location: ../connections.php?accepted=1');
+    exit;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Decline
+|--------------------------------------------------------------------------
+*/
+
+$update = $pdo->prepare("
+    UPDATE connections
+    SET status = 'declined'
+    WHERE id = :connection_id
+");
+
+$update->execute([
+    ':connection_id' => $connectionId
+]);
+
+header('Location: ../connections.php?declined=1');
 exit;
