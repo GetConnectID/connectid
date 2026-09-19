@@ -3,6 +3,7 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/csrf.php';
+require_once __DIR__ . '/notification_service.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ../messages.php');
@@ -13,76 +14,67 @@ verifyCsrfToken($_POST['csrf_token'] ?? null);
 
 $userId = (int) $_SESSION['user_id'];
 
-$receiverUsername = trim($_POST['receiver_username'] ?? '');
-$receiverUsername = ltrim($receiverUsername, '@');
-
+$targetUsername = trim($_POST['receiver_username'] ?? '');
 $message = trim($_POST['message'] ?? '');
 
-if (
-    $receiverUsername === '' ||
-    !preg_match('/^[A-Za-z0-9_]{3,30}$/', $receiverUsername)
-) {
-    header('Location: ../messages.php?error=invalid_user');
+if ($targetUsername === '' || $message === '') {
+    header('Location: ../messages.php?error=missing');
     exit;
 }
 
-if ($message === '' || strlen($message) > 5000) {
-    header('Location: ../messages.php?error=invalid_message');
+if (mb_strlen($message) > 2000) {
+    header('Location: ../messages.php?error=too_long');
     exit;
 }
 
 $stmt = $pdo->prepare("
-    SELECT id, username
+    SELECT
+        id,
+        username,
+        display_name
     FROM users
     WHERE username = :username
-      AND status = 'active'
+    AND status = 'active'
     LIMIT 1
 ");
 
 $stmt->execute([
-    ':username' => $receiverUsername
+    ':username' => $targetUsername
 ]);
 
-$receiver = $stmt->fetch();
+$targetUser = $stmt->fetch();
 
-if (!$receiver) {
-    header('Location: ../messages.php?error=user_not_found');
+if (!$targetUser) {
+    header('Location: ../messages.php?error=user');
     exit;
 }
 
-$receiverId = (int) $receiver['id'];
+$targetUserId = (int) $targetUser['id'];
 
-if ($receiverId === $userId) {
-    header('Location: ../messages.php?error=self');
+if ($targetUserId === $userId) {
+    header('Location: ../messages.php?user=' . urlencode($targetUsername) . '&error=self');
     exit;
 }
 
-$connectionStmt = $pdo->prepare("
+$connection = $pdo->prepare("
     SELECT id
     FROM connections
-    WHERE
-        (
-            requester_id = :user_a
-            AND receiver_id = :user_b
-        )
+    WHERE status = 'accepted'
+    AND (
+        (requester_id = :user_id AND receiver_id = :target_id)
         OR
-        (
-            requester_id = :user_b2
-            AND receiver_id = :user_a2
-        )
-    AND status = 'accepted'
+        (requester_id = :target_id AND receiver_id = :user_id)
+    )
     LIMIT 1
 ");
 
-$connectionStmt->execute([
-    ':user_a' => $userId,
-    ':user_b' => $receiverId,
-    ':user_b2' => $userId,
-    ':user_a2' => $receiverId
+$connection->execute([
+    ':user_id' => $userId,
+    ':target_id' => $targetUserId
 ]);
 
-if (!$connectionStmt->fetch()) {
-    header('Location: ../connections.php?error=not_connected');
+if (!$connection->fetch()) {
+    header('Location: ../messages.php?user=' . urlencode($targetUsername) . '&error=not_connected');
     exit;
 }
 
@@ -103,13 +95,23 @@ $insert = $pdo->prepare("
 
 $insert->execute([
     ':sender_id' => $userId,
-    ':receiver_id' => $receiverId,
+    ':receiver_id' => $targetUserId,
     ':message' => $message
 ]);
 
-header(
-    'Location: ../messages.php?user=' .
-    urlencode($receiver['username'])
+$messageId = (int) $pdo->lastInsertId();
+
+$senderName = $_SESSION['display_name'] ?? $_SESSION['username'];
+
+createNotification(
+    $pdo,
+    $targetUserId,
+    'message',
+    'New message',
+    $senderName . ' sent you a message.',
+    'message',
+    $messageId
 );
 
+header('Location: ../messages.php?user=' . urlencode($targetUsername));
 exit;
