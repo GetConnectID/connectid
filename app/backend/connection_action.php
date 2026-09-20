@@ -13,62 +13,41 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 verifyCsrfToken($_POST['csrf_token'] ?? null);
 
 $userId = (int) $_SESSION['user_id'];
-
 $connectionId = (int) ($_POST['connection_id'] ?? 0);
-$action = $_POST['action'] ?? '';
+$action = trim($_POST['action'] ?? '');
 
-if ($connectionId <= 0) {
-    header('Location: ../connections.php?error=invalid_connection');
+if ($connectionId <= 0 || !in_array($action, ['accept', 'decline'], true)) {
+    header('Location: ../connections.php?error=invalid');
     exit;
 }
-
-if (!in_array($action, ['accept', 'decline'], true)) {
-    header('Location: ../connections.php?error=invalid_action');
-    exit;
-}
-
-/*
-|--------------------------------------------------------------------------
-| Load pending request
-|--------------------------------------------------------------------------
-*/
 
 $stmt = $pdo->prepare("
     SELECT
-        c.id,
-        c.requester_id,
-        c.receiver_id,
-        c.status,
-        u.username,
-        u.display_name
-    FROM connections c
-    JOIN users u
-        ON u.id = c.requester_id
-    WHERE c.id = :connection_id
-    AND c.receiver_id = :user_id
-    AND c.status = 'pending'
+        id,
+        requester_id,
+        receiver_id,
+        status
+    FROM connections
+    WHERE id = :connection_id
     LIMIT 1
 ");
 
 $stmt->execute([
-    ':connection_id' => $connectionId,
-    ':user_id' => $userId
+    ':connection_id' => $connectionId
 ]);
 
 $connection = $stmt->fetch();
 
-if (!$connection) {
-    header('Location: ../connections.php?error=connection_not_found');
+if (
+    !$connection ||
+    (int) $connection['receiver_id'] !== $userId ||
+    $connection['status'] !== 'pending'
+) {
+    header('Location: ../connections.php?error=unauthorized');
     exit;
 }
 
 $requesterId = (int) $connection['requester_id'];
-
-/*
-|--------------------------------------------------------------------------
-| Accept
-|--------------------------------------------------------------------------
-*/
 
 if ($action === 'accept') {
 
@@ -76,41 +55,61 @@ if ($action === 'accept') {
         UPDATE connections
         SET status = 'accepted'
         WHERE id = :connection_id
+        AND receiver_id = :user_id
+        AND status = 'pending'
     ");
 
     $update->execute([
-        ':connection_id' => $connectionId
+        ':connection_id' => $connectionId,
+        ':user_id' => $userId
     ]);
+
+    if ($update->rowCount() !== 1) {
+        header('Location: ../connections.php?error=update');
+        exit;
+    }
 
     createNotification(
         $pdo,
         $requesterId,
-        'connection_accepted',
+        'connection',
         'Connection accepted',
-        '@' . $_SESSION['username'] . ' accepted your connection request.',
+        ($_SESSION['display_name'] ?? $_SESSION['username']) . ' accepted your connection request.',
         'connection',
         $connectionId
     );
 
-    header('Location: ../connections.php?accepted=1');
+    header('Location: ../connections.php?success=accepted');
     exit;
 }
-
-/*
-|--------------------------------------------------------------------------
-| Decline
-|--------------------------------------------------------------------------
-*/
 
 $update = $pdo->prepare("
     UPDATE connections
     SET status = 'declined'
     WHERE id = :connection_id
+    AND receiver_id = :user_id
+    AND status = 'pending'
 ");
 
 $update->execute([
-    ':connection_id' => $connectionId
+    ':connection_id' => $connectionId,
+    ':user_id' => $userId
 ]);
 
-header('Location: ../connections.php?declined=1');
+if ($update->rowCount() !== 1) {
+    header('Location: ../connections.php?error=update');
+    exit;
+}
+
+createNotification(
+    $pdo,
+    $requesterId,
+    'connection',
+    'Connection request declined',
+    ($_SESSION['display_name'] ?? $_SESSION['username']) . ' declined your connection request.',
+    'connection',
+    $connectionId
+);
+
+header('Location: ../connections.php?success=declined');
 exit;
