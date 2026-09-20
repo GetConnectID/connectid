@@ -1,11 +1,15 @@
 <?php
 
+require_once __DIR__ . '/session.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/csrf.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ../register.html');
     exit;
 }
+
+verifyCsrfToken($_POST['csrf_token'] ?? null);
 
 $displayName = trim($_POST['display_name'] ?? '');
 $username = trim($_POST['username'] ?? '');
@@ -14,56 +18,85 @@ $passwordConfirm = $_POST['password_confirm'] ?? '';
 
 $username = ltrim($username, '@');
 
-if ($displayName === '' || $username === '' || $password === '') {
-    exit('Please complete all required fields.');
+if (
+    $displayName === '' ||
+    $username === '' ||
+    $password === '' ||
+    $passwordConfirm === ''
+) {
+    header('Location: ../register.html?error=missing');
+    exit;
 }
 
-if ($password !== $passwordConfirm) {
-    exit('Passwords do not match.');
+if (mb_strlen($displayName) > 100) {
+    header('Location: ../register.html?error=display_name');
+    exit;
+}
+
+if (!preg_match('/^[A-Za-z0-9_]{3,30}$/', $username)) {
+    header('Location: ../register.html?error=username');
+    exit;
 }
 
 if (strlen($password) < 8) {
-    exit('Password must contain at least 8 characters.');
-}
-
-if (!preg_match('/^[a-zA-Z0-9_]{3,30}$/', $username)) {
-    exit('Username may only contain letters, numbers and underscores.');
-}
-
-try {
-    $check = $pdo->prepare(
-        'SELECT id FROM users WHERE username = :username LIMIT 1'
-    );
-
-    $check->execute([
-        'username' => strtolower($username)
-    ]);
-
-    if ($check->fetch()) {
-        exit('This username is already taken.');
-    }
-
-    $passwordHash = password_hash($password, PASSWORD_DEFAULT);
-
-    $stmt = $pdo->prepare(
-        'INSERT INTO users
-        (username, display_name, password_hash, citizen, role, reputation, status)
-        VALUES
-        (:username, :display_name, :password_hash, 1, :role, 0, :status)'
-    );
-
-    $stmt->execute([
-        'username' => strtolower($username),
-        'display_name' => $displayName,
-        'password_hash' => $passwordHash,
-        'role' => 'citizen',
-        'status' => 'active'
-    ]);
-
-    header('Location: ../login.html?registered=1');
+    header('Location: ../register.html?error=password');
     exit;
-
-} catch (PDOException $e) {
-    http_response_code(500);
-    exit('Registration failed.');
 }
+
+if ($password !== $passwordConfirm) {
+    header('Location: ../register.html?error=match');
+    exit;
+}
+
+$stmt = $pdo->prepare("
+    SELECT id
+    FROM users
+    WHERE username = :username
+    LIMIT 1
+");
+
+$stmt->execute([
+    ':username' => $username
+]);
+
+if ($stmt->fetch()) {
+    header('Location: ../register.html?error=taken');
+    exit;
+}
+
+$passwordHash = password_hash(
+    $password,
+    PASSWORD_DEFAULT
+);
+
+$insert = $pdo->prepare("
+    INSERT INTO users
+    (
+        username,
+        display_name,
+        password_hash,
+        citizen,
+        role,
+        reputation,
+        status
+    )
+    VALUES
+    (
+        :username,
+        :display_name,
+        :password_hash,
+        1,
+        'citizen',
+        0,
+        'active'
+    )
+");
+
+$insert->execute([
+    ':username' => $username,
+    ':display_name' => $displayName,
+    ':password_hash' => $passwordHash
+]);
+
+header('Location: ../login.html?registered=1');
+exit;
