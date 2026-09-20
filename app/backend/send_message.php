@@ -78,40 +78,56 @@ if (!$connection->fetch()) {
     exit;
 }
 
-$insert = $pdo->prepare("
-    INSERT INTO messages
-    (
-        sender_id,
-        receiver_id,
-        message
-    )
-    VALUES
-    (
-        :sender_id,
-        :receiver_id,
-        :message
-    )
-");
+$pdo->beginTransaction();
 
-$insert->execute([
-    ':sender_id' => $userId,
-    ':receiver_id' => $targetUserId,
-    ':message' => $message
-]);
+try {
 
-$messageId = (int) $pdo->lastInsertId();
+    $insert = $pdo->prepare("
+        INSERT INTO messages
+        (
+            sender_id,
+            receiver_id,
+            message
+        )
+        VALUES
+        (
+            :sender_id,
+            :receiver_id,
+            :message
+        )
+    ");
 
-$senderName = $_SESSION['display_name'] ?? $_SESSION['username'];
+    $insert->execute([
+        ':sender_id' => $userId,
+        ':receiver_id' => $targetUserId,
+        ':message' => $message
+    ]);
 
-createNotification(
-    $pdo,
-    $targetUserId,
-    'message',
-    'New message',
-    $senderName . ' sent you a message.',
-    'message',
-    $messageId
-);
+    $messageId = (int) $pdo->lastInsertId();
+
+    $senderName = $_SESSION['display_name'] ?? $_SESSION['username'];
+
+    createNotification(
+        $pdo,
+        $targetUserId,
+        'message',
+        'New message',
+        $senderName . ' sent you a message.',
+        'message',
+        $messageId
+    );
+
+    $pdo->commit();
+
+} catch (Throwable $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    header('Location: ../messages.php?user=' . urlencode($targetUsername) . '&error=send');
+    exit;
+}
 
 header('Location: ../messages.php?user=' . urlencode($targetUsername));
 exit;
