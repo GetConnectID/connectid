@@ -79,6 +79,9 @@ if (!$user || !$successful) {
     exit;
 }
 
+/*
+ * Prevent session fixation after successful login.
+ */
 session_regenerate_id(true);
 
 $_SESSION['user_id'] = (int) $user['id'];
@@ -89,6 +92,11 @@ $_SESSION['role'] = $user['role'];
 $_SESSION['reputation'] = (int) $user['reputation'];
 $_SESSION['avatar'] = $user['avatar'];
 $_SESSION['wallet_address'] = $user['wallet_address'];
+
+/*
+ * Generate a fresh CSRF token for the authenticated session.
+ */
+$_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 
 header('Location: ../home.php');
 exit;
