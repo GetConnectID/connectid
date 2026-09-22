@@ -1,0 +1,10 @@
+RewriteEngine On
+
+# Laat bestanden en mappen onder /app rechtstreeks met rust
+RewriteRule ^app(?:/|$) - [L]
+
+# Root van app.get-connectid.eu
+RewriteRule ^$ app/ [L]
+
+# Alle overige verzoeken naar de app-map
+RewriteRule ^(.+)$ app/$1 [L]
