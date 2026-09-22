@@ -45,55 +45,155 @@ if ($password !== $passwordConfirm) {
     exit;
 }
 
-$stmt = $pdo->prepare("
-    SELECT id
-    FROM users
-    WHERE username = :username
-    LIMIT 1
-");
-
-$stmt->execute([
-    ':username' => $username
-]);
-
-if ($stmt->fetch()) {
-    header('Location: ../register.html?error=taken');
-    exit;
-}
-
 $passwordHash = password_hash(
     $password,
     PASSWORD_DEFAULT
 );
 
-$insert = $pdo->prepare("
-    INSERT INTO users
-    (
-        username,
-        display_name,
-        password_hash,
-        citizen,
-        role,
-        reputation,
-        status
-    )
-    VALUES
-    (
-        :username,
-        :display_name,
-        :password_hash,
-        1,
-        'citizen',
-        0,
-        'active'
-    )
-");
+try {
 
-$insert->execute([
-    ':username' => $username,
-    ':display_name' => $displayName,
-    ':password_hash' => $passwordHash
-]);
+    $pdo->beginTransaction();
 
-header('Location: ../login.html?registered=1');
-exit;
+    /*
+     * The system_settings row acts as the permanent
+     * Creator lock. The first registered user becomes
+     * the Creator.
+     */
+    $creatorSetting = $pdo->prepare("
+        SELECT setting_value
+        FROM system_settings
+        WHERE setting_key = 'creator_user_id'
+        FOR UPDATE
+    ");
+
+    $creatorSetting->execute();
+
+    $creatorUserId = $creatorSetting->fetchColumn();
+
+    /*
+     * If the setting does not exist yet, create it.
+     * A value of 0 means that no Creator exists yet.
+     */
+    if ($creatorUserId === false) {
+
+        $createSetting = $pdo->prepare("
+            INSERT INTO system_settings
+            (
+                setting_key,
+                setting_value
+            )
+            VALUES
+            (
+                'creator_user_id',
+                '0'
+            )
+        ");
+
+        $createSetting->execute();
+
+        $creatorUserId = '0';
+    }
+
+    /*
+     * Check username while the transaction is active.
+     * The database unique index added later also protects
+     * against duplicate usernames caused by simultaneous
+     * registration attempts.
+     */
+    $usernameCheck = $pdo->prepare("
+        SELECT id
+        FROM users
+        WHERE username = :username
+        LIMIT 1
+    ");
+
+    $usernameCheck->execute([
+        ':username' => $username
+    ]);
+
+    if ($usernameCheck->fetch()) {
+        $pdo->rollBack();
+
+        header('Location: ../register.html?error=taken');
+        exit;
+    }
+
+    $isFirstUser = (
+        (string) $creatorUserId === '0'
+    );
+
+    $role = $isFirstUser
+        ? 'creator'
+        : 'citizen';
+
+    $insert = $pdo->prepare("
+        INSERT INTO users
+        (
+            username,
+            display_name,
+            password_hash,
+            citizen,
+            role,
+            reputation,
+            status
+        )
+        VALUES
+        (
+            :username,
+            :display_name,
+            :password_hash,
+            1,
+            :role,
+            0,
+            'active'
+        )
+    ");
+
+    $insert->execute([
+        ':username' => $username,
+        ':display_name' => $displayName,
+        ':password_hash' => $passwordHash,
+        ':role' => $role
+    ]);
+
+    $newUserId = (int) $pdo->lastInsertId();
+
+    /*
+     * Permanently register the Creator.
+     */
+    if ($isFirstUser) {
+
+        $updateCreator = $pdo->prepare("
+            UPDATE system_settings
+            SET setting_value = :creator_user_id
+            WHERE setting_key = 'creator_user_id'
+        ");
+
+        $updateCreator->execute([
+            ':creator_user_id' => $newUserId
+        ]);
+    }
+
+    $pdo->commit();
+
+    header('Location: ../login.html?registered=1');
+    exit;
+
+} catch (Throwable $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    /*
+     * A duplicate username can still occur if two
+     * registrations reach the database simultaneously.
+     */
+    if ($e instanceof PDOException && $e->getCode() === '23000') {
+        header('Location: ../register.html?error=taken');
+        exit;
+    }
+
+    header('Location: ../register.html?error=register');
+    exit;
+}
