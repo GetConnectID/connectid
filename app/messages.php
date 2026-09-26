@@ -1,9 +1,5 @@
 <?php
 
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-
 require_once __DIR__ . '/backend/auth.php';
 require_once __DIR__ . '/backend/db.php';
 require_once __DIR__ . '/backend/csrf.php';
@@ -49,28 +45,45 @@ if ($targetUsername !== '') {
 
         /*
          * Check accepted connection.
+         *
+         * Separate parameter names are intentionally used
+         * because PDO native prepared statements do not
+         * safely support reusing the same named placeholder.
          */
+        $targetUserId = (int) $targetUser['id'];
+
         $connection = $pdo->prepare("
             SELECT id
             FROM connections
             WHERE status = 'accepted'
             AND (
-                (requester_id = :user_id AND receiver_id = :target_id)
+                (
+                    requester_id = :connection_user_id
+                    AND receiver_id = :connection_target_id
+                )
                 OR
-                (requester_id = :target_id AND receiver_id = :user_id)
+                (
+                    requester_id = :connection_target_id_2
+                    AND receiver_id = :connection_user_id_2
+                )
             )
             LIMIT 1
         ");
 
         $connection->execute([
-            ':user_id' => $userId,
-            ':target_id' => (int) $targetUser['id']
+            ':connection_user_id' => $userId,
+            ':connection_target_id' => $targetUserId,
+            ':connection_target_id_2' => $targetUserId,
+            ':connection_user_id_2' => $userId
         ]);
 
         $connectionAccepted = (bool) $connection->fetch();
 
         if ($connectionAccepted) {
 
+            /*
+             * Load conversation.
+             */
             $messageStmt = $pdo->prepare("
                 SELECT
                     m.id,
@@ -85,20 +98,22 @@ if ($targetUsername !== '') {
                     ON u.id = m.sender_id
                 WHERE
                     (
-                        m.sender_id = :user_id
-                        AND m.receiver_id = :target_id
+                        m.sender_id = :message_user_id
+                        AND m.receiver_id = :message_target_id
                     )
                     OR
                     (
-                        m.sender_id = :target_id
-                        AND m.receiver_id = :user_id
+                        m.sender_id = :message_target_id_2
+                        AND m.receiver_id = :message_user_id_2
                     )
                 ORDER BY m.created_at ASC, m.id ASC
             ");
 
             $messageStmt->execute([
-                ':user_id' => $userId,
-                ':target_id' => (int) $targetUser['id']
+                ':message_user_id' => $userId,
+                ':message_target_id' => $targetUserId,
+                ':message_target_id_2' => $targetUserId,
+                ':message_user_id_2' => $userId
             ]);
 
             $messages = $messageStmt->fetchAll();
@@ -122,21 +137,28 @@ $connectionsStmt = $pdo->prepare("
     FROM connections c
     JOIN users u
         ON u.id = CASE
-            WHEN c.requester_id = :user_id THEN c.receiver_id
+            WHEN c.requester_id = :sidebar_user_id
+            THEN c.receiver_id
             ELSE c.requester_id
         END
     WHERE
-        (c.requester_id = :user_id OR c.receiver_id = :user_id)
+        (
+            c.requester_id = :sidebar_user_id_2
+            OR c.receiver_id = :sidebar_user_id_3
+        )
         AND c.status = 'accepted'
         AND u.status = 'active'
     ORDER BY u.display_name ASC
 ");
 
 $connectionsStmt->execute([
-    ':user_id' => $userId
+    ':sidebar_user_id' => $userId,
+    ':sidebar_user_id_2' => $userId,
+    ':sidebar_user_id_3' => $userId
 ]);
 
 $connections = $connectionsStmt->fetchAll();
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -360,7 +382,7 @@ $connections = $connectionsStmt->fetchAll();
     <a href="connections.php">Connections</a>
     <a href="messages.php">Messages</a>
     <a href="communities.php">Communities</a>
-    <a href="backend/logout.php">Logout</a>
+    <a href="logout.php">Logout</a>
 </nav>
 
 <div class="layout">
@@ -574,7 +596,11 @@ async function refreshMessages() {
             element.dataset.messageId = message.id;
 
             const text = document.createElement('div');
-            text.innerHTML = message.message;
+
+            /*
+             * Treat incoming message text as plain text.
+             */
+            text.textContent = message.message;
 
             const time = document.createElement('div');
             time.className = 'message-time';
