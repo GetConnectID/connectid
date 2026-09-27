@@ -21,12 +21,12 @@ $userStmt = $pdo->prepare("
         role,
         reputation
     FROM users
-    WHERE id = :user_id
+    WHERE id = :current_user_id
     LIMIT 1
 ");
 
 $userStmt->execute([
-    ':user_id' => $userId
+    ':current_user_id' => $userId
 ]);
 
 $currentUser = $userStmt->fetch();
@@ -48,26 +48,39 @@ $stmt = $pdo->prepare("
         creator.username AS creator_username,
         creator.display_name AS creator_display_name,
         COUNT(cm.user_id) AS member_count,
+
         CASE
-            WHEN c.creator_id = :user_id THEN 1
+            WHEN c.creator_id = :community_user_id
+            THEN 1
+
             WHEN EXISTS (
                 SELECT 1
                 FROM community_members cm2
                 WHERE cm2.community_id = c.id
-                AND cm2.user_id = :user_id
-            ) THEN 1
+                AND cm2.user_id = :community_user_id_2
+            )
+            THEN 1
+
             ELSE 0
         END AS is_member,
+
         CASE
-            WHEN c.creator_id = :user_id THEN 1
+            WHEN c.creator_id = :community_user_id_3
+            THEN 1
+
             ELSE 0
         END AS is_creator
+
     FROM communities c
+
     JOIN users creator
         ON creator.id = c.creator_id
+
     LEFT JOIN community_members cm
         ON cm.community_id = c.id
+
     WHERE c.status = 'active'
+
     GROUP BY
         c.id,
         c.name,
@@ -77,11 +90,14 @@ $stmt = $pdo->prepare("
         c.created_at,
         creator.username,
         creator.display_name
+
     ORDER BY c.created_at DESC
 ");
 
 $stmt->execute([
-    ':user_id' => $userId
+    ':community_user_id' => $userId,
+    ':community_user_id_2' => $userId,
+    ':community_user_id_3' => $userId
 ]);
 
 $communities = $stmt->fetchAll();
@@ -90,15 +106,23 @@ $created = isset($_GET['created']);
 $joined = isset($_GET['joined']);
 $left = isset($_GET['left']);
 $error = $_GET['error'] ?? '';
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
     <title>Communities | ConnectID</title>
 
     <style>
+
         * {
             box-sizing: border-box;
         }
@@ -260,6 +284,7 @@ $error = $_GET['error'] ?? '';
         }
 
         @media (max-width: 700px) {
+
             nav {
                 line-height: 2;
             }
@@ -271,19 +296,29 @@ $error = $_GET['error'] ?? '';
             .container {
                 margin-top: 25px;
             }
+
         }
+
     </style>
+
 </head>
 
 <body>
 
 <nav>
+
     <a href="home.php">Home</a>
+
     <a href="profile.php">Profile</a>
+
     <a href="connections.php">Connections</a>
+
     <a href="messages.php">Messages</a>
+
     <a href="communities.php">Communities</a>
-    <a href="backend/logout.php">Logout</a>
+
+    <a href="logout.php">Logout</a>
+
 </nav>
 
 <div class="container">
@@ -360,7 +395,10 @@ $error = $_GET['error'] ?? '';
 
         <h2>Create a Community</h2>
 
-        <form method="post" action="backend/community_action.php">
+        <form
+            method="post"
+            action="backend/community_action.php"
+        >
 
             <input
                 type="text"
