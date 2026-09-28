@@ -6,7 +6,7 @@ require_once __DIR__ . '/csrf.php';
 
 $userId = (int) $_SESSION['user_id'];
 
-$csrfToken = generateCsrfToken();
+$csrfToken = csrfToken();
 
 /*
 |--------------------------------------------------------------------------
@@ -163,12 +163,24 @@ if (isset($_GET['sent']) && $_GET['sent'] === '1') {
 
 $errorMessage = '';
 
-if (isset($_GET['error']) && isset($errorMessages[$_GET['error']])) {
+if (
+    isset($_GET['error']) &&
+    isset($errorMessages[$_GET['error']])
+) {
     $errorMessage = $errorMessages[$_GET['error']];
 }
 
-function connectionInitials(string $displayName, string $username): string
-{
+/*
+|--------------------------------------------------------------------------
+| Avatar helpers
+|--------------------------------------------------------------------------
+*/
+
+function connectionInitials(
+    string $displayName,
+    string $username
+): string {
+
     $name = trim($displayName);
 
     if ($name === '') {
@@ -184,14 +196,20 @@ function connectionInitials(string $displayName, string $username): string
         );
     }
 
-    return strtoupper(mb_substr($name, 0, 2));
+    return strtoupper(
+        mb_substr($name, 0, 2)
+    );
 }
 
 function renderConnectionAvatar(array $user): string
 {
     if (!empty($user['avatar'])) {
         return '<img src="' .
-            htmlspecialchars($user['avatar'], ENT_QUOTES, 'UTF-8') .
+            htmlspecialchars(
+                $user['avatar'],
+                ENT_QUOTES,
+                'UTF-8'
+            ) .
             '" alt="" class="connection-avatar-image">';
     }
 
@@ -210,7 +228,9 @@ function renderConnectionAvatar(array $user): string
 <!DOCTYPE html>
 <html lang="en">
 <head>
+
     <meta charset="UTF-8">
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0"
@@ -219,6 +239,7 @@ function renderConnectionAvatar(array $user): string
     <title>Connections - ConnectID</title>
 
     <style>
+
         * {
             box-sizing: border-box;
         }
@@ -275,6 +296,7 @@ function renderConnectionAvatar(array $user): string
             margin-top: 5px;
             color: #777777;
             font-size: 11px;
+            line-height: 1.4;
         }
 
         .nav {
@@ -522,6 +544,32 @@ function renderConnectionAvatar(array $user): string
             color: #ff9a45;
         }
 
+        .request-actions {
+            display: flex;
+            gap: 7px;
+        }
+
+        .small-button {
+            height: 34px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1px solid #303030;
+            background: #171717;
+            color: #ffffff;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .small-button:hover {
+            border-color: #ff7a00;
+        }
+
+        .small-button.accept {
+            background: #ff7a00;
+            border-color: #ff7a00;
+        }
+
         .empty {
             padding: 22px 10px;
             text-align: center;
@@ -536,6 +584,7 @@ function renderConnectionAvatar(array $user): string
         }
 
         @media (max-width: 800px) {
+
             .sidebar {
                 position: static;
                 width: 100%;
@@ -588,8 +637,18 @@ function renderConnectionAvatar(array $user): string
             .card-header {
                 align-items: flex-start;
             }
+
+            .connection-item {
+                align-items: flex-start;
+            }
+
+            .request-actions {
+                flex-direction: column;
+            }
         }
+
     </style>
+
 </head>
 
 <body>
@@ -599,6 +658,7 @@ function renderConnectionAvatar(array $user): string
     <aside class="sidebar">
 
         <div class="brand">
+
             <div class="brand-name">
                 Connect<span>ID</span>
             </div>
@@ -606,21 +666,46 @@ function renderConnectionAvatar(array $user): string
             <div class="brand-tagline">
                 Own your identity. Build your reputation.
             </div>
+
         </div>
 
         <nav class="nav">
-            <a href="home.php">Home</a>
-            <a href="profile.php">Profile</a>
-            <a href="connections.php" class="active">Connections</a>
-            <a href="messages.php">Messages</a>
-            <a href="communities.php">Communities</a>
-            <a href="notifications.php">Notifications</a>
+
+            <a href="home.php">
+                Home
+            </a>
+
+            <a href="profile.php">
+                Profile
+            </a>
+
+            <a href="connections.php" class="active">
+                Connections
+            </a>
+
+            <a href="messages.php">
+                Messages
+            </a>
+
+            <a href="communities.php">
+                Communities
+            </a>
+
+            <a href="notifications.php">
+                Notifications
+            </a>
+
         </nav>
 
         <div class="sidebar-bottom">
-            <a href="logout.php" class="logout-link">
+
+            <a
+                href="logout.php"
+                class="logout-link"
+            >
                 Sign out
             </a>
+
         </div>
 
     </aside>
@@ -630,35 +715,57 @@ function renderConnectionAvatar(array $user): string
         <div class="content">
 
             <div class="page-header">
-                <h1 class="page-title">Connections</h1>
+
+                <h1 class="page-title">
+                    Connections
+                </h1>
 
                 <p class="page-subtitle">
                     Build your network through mutual connections.
                 </p>
+
             </div>
 
             <?php if ($successMessage): ?>
+
                 <div class="notice success">
-                    <?= htmlspecialchars($successMessage, ENT_QUOTES, 'UTF-8') ?>
+                    <?= htmlspecialchars(
+                        $successMessage,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
                 </div>
+
             <?php endif; ?>
 
             <?php if ($errorMessage): ?>
+
                 <div class="notice error">
-                    <?= htmlspecialchars($errorMessage, ENT_QUOTES, 'UTF-8') ?>
+                    <?= htmlspecialchars(
+                        $errorMessage,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
                 </div>
+
             <?php endif; ?>
 
             <section class="card">
 
                 <div class="card-header">
+
                     <div>
-                        <h2 class="card-title">Add connection</h2>
+
+                        <h2 class="card-title">
+                            Add connection
+                        </h2>
 
                         <p class="card-description">
                             Enter a ConnectID username to send a connection request.
                         </p>
+
                     </div>
+
                 </div>
 
                 <form
@@ -670,7 +777,11 @@ function renderConnectionAvatar(array $user): string
                     <input
                         type="hidden"
                         name="csrf_token"
-                        value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>"
+                        value="<?= htmlspecialchars(
+                            $csrfToken,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
                     >
 
                     <input
@@ -697,7 +808,9 @@ function renderConnectionAvatar(array $user): string
             <section class="card">
 
                 <div class="card-header">
+
                     <div>
+
                         <h2 class="card-title">
                             Connection requests
                         </h2>
@@ -705,7 +818,9 @@ function renderConnectionAvatar(array $user): string
                         <p class="card-description">
                             Requests waiting for your response.
                         </p>
+
                     </div>
+
                 </div>
 
                 <div class="section-list">
@@ -729,42 +844,128 @@ function renderConnectionAvatar(array $user): string
                                 <div class="connection-info">
 
                                     <div class="connection-name">
+
                                         <?= htmlspecialchars(
                                             $request['display_name'],
                                             ENT_QUOTES,
                                             'UTF-8'
                                         ) ?>
 
-                                        <?php if ((int) $request['citizen'] === 1): ?>
+                                        <?php if (
+                                            (int) $request['citizen'] === 1
+                                        ): ?>
+
                                             <span class="badge badge-citizen">
                                                 Citizen
                                             </span>
+
                                         <?php endif; ?>
 
-                                        <?php if ($request['role'] === 'creator'): ?>
+                                        <?php if (
+                                            $request['role'] === 'creator'
+                                        ): ?>
+
                                             <span class="badge badge-role">
                                                 Creator
                                             </span>
+
                                         <?php endif; ?>
+
                                     </div>
 
                                     <div class="connection-username">
+
                                         @<?= htmlspecialchars(
                                             $request['username'],
                                             ENT_QUOTES,
                                             'UTF-8'
                                         ) ?>
+
                                     </div>
 
                                     <div class="connection-meta">
+
                                         Reputation:
                                         <?= (int) $request['reputation'] ?>
+
                                     </div>
 
                                 </div>
 
-                                <div class="request-status">
-                                    Pending
+                                <div class="request-actions">
+
+                                    <form
+                                        method="POST"
+                                        action="backend/connection_action.php"
+                                    >
+
+                                        <input
+                                            type="hidden"
+                                            name="csrf_token"
+                                            value="<?= htmlspecialchars(
+                                                $csrfToken,
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="connection_id"
+                                            value="<?= (int) $request['id'] ?>"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="action"
+                                            value="accept"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="small-button accept"
+                                        >
+                                            Accept
+                                        </button>
+
+                                    </form>
+
+                                    <form
+                                        method="POST"
+                                        action="backend/connection_action.php"
+                                    >
+
+                                        <input
+                                            type="hidden"
+                                            name="csrf_token"
+                                            value="<?= htmlspecialchars(
+                                                $csrfToken,
+                                                ENT_QUOTES,
+                                                'UTF-8'
+                                            ) ?>"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="connection_id"
+                                            value="<?= (int) $request['id'] ?>"
+                                        >
+
+                                        <input
+                                            type="hidden"
+                                            name="action"
+                                            value="decline"
+                                        >
+
+                                        <button
+                                            type="submit"
+                                            class="small-button"
+                                        >
+                                            Decline
+                                        </button>
+
+                                    </form>
+
                                 </div>
 
                             </div>
@@ -780,7 +981,9 @@ function renderConnectionAvatar(array $user): string
             <section class="card">
 
                 <div class="card-header">
+
                     <div>
+
                         <h2 class="card-title">
                             My connections
                         </h2>
@@ -788,7 +991,9 @@ function renderConnectionAvatar(array $user): string
                         <p class="card-description">
                             People you are connected with.
                         </p>
+
                     </div>
+
                 </div>
 
                 <div class="section-list">
@@ -819,31 +1024,43 @@ function renderConnectionAvatar(array $user): string
                                             'UTF-8'
                                         ) ?>
 
-                                        <?php if ((int) $connection['citizen'] === 1): ?>
+                                        <?php if (
+                                            (int) $connection['citizen'] === 1
+                                        ): ?>
+
                                             <span class="badge badge-citizen">
                                                 Citizen
                                             </span>
+
                                         <?php endif; ?>
 
-                                        <?php if ($connection['role'] === 'creator'): ?>
+                                        <?php if (
+                                            $connection['role'] === 'creator'
+                                        ): ?>
+
                                             <span class="badge badge-role">
                                                 Creator
                                             </span>
+
                                         <?php endif; ?>
 
                                     </div>
 
                                     <div class="connection-username">
+
                                         @<?= htmlspecialchars(
                                             $connection['username'],
                                             ENT_QUOTES,
                                             'UTF-8'
                                         ) ?>
+
                                     </div>
 
                                     <div class="connection-meta">
+
                                         Reputation:
                                         <?= (int) $connection['reputation'] ?>
+
                                     </div>
 
                                 </div>
@@ -861,7 +1078,9 @@ function renderConnectionAvatar(array $user): string
             <section class="card">
 
                 <div class="card-header">
+
                     <div>
+
                         <h2 class="card-title">
                             Sent requests
                         </h2>
@@ -869,7 +1088,9 @@ function renderConnectionAvatar(array $user): string
                         <p class="card-description">
                             Connection requests you have sent.
                         </p>
+
                     </div>
+
                 </div>
 
                 <div class="section-list">
@@ -893,19 +1114,23 @@ function renderConnectionAvatar(array $user): string
                                 <div class="connection-info">
 
                                     <div class="connection-name">
+
                                         <?= htmlspecialchars(
                                             $request['display_name'],
                                             ENT_QUOTES,
                                             'UTF-8'
                                         ) ?>
+
                                     </div>
 
                                     <div class="connection-username">
+
                                         @<?= htmlspecialchars(
                                             $request['username'],
                                             ENT_QUOTES,
                                             'UTF-8'
                                         ) ?>
+
                                     </div>
 
                                 </div>
