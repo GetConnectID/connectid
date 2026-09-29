@@ -4,14 +4,22 @@ require_once __DIR__ . '/backend/auth.php';
 require_once __DIR__ . '/backend/db.php';
 
 $stmt = $pdo->prepare(
-    'SELECT id, username, display_name, avatar, citizen, role, reputation, wallet_address
+    'SELECT
+        id,
+        username,
+        display_name,
+        avatar,
+        citizen,
+        role,
+        reputation,
+        wallet_address
      FROM users
      WHERE id = :id
      LIMIT 1'
 );
 
 $stmt->execute([
-    'id' => $_SESSION['user_id']
+    ':id' => $_SESSION['user_id']
 ]);
 
 $user = $stmt->fetch();
@@ -22,20 +30,29 @@ if (!$user) {
 }
 
 $role = strtoupper($user['role']);
+
 $walletStatus = $user['wallet_address']
     ? 'Wallet connected'
     : 'No wallet connected';
+
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Home - ConnectID</title>
 
     <style>
+
         * {
             box-sizing: border-box;
         }
@@ -140,6 +157,13 @@ $walletStatus = $user['wallet_address']
             justify-content: center;
             color: #777777;
             font-size: 13px;
+            overflow: hidden;
+        }
+
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
 
         .identity h2 {
@@ -186,6 +210,7 @@ $walletStatus = $user['wallet_address']
 
         .wallet {
             color: #999999;
+            font-size: 18px;
         }
 
         .section {
@@ -215,6 +240,7 @@ $walletStatus = $user['wallet_address']
         }
 
         @media (max-width: 800px) {
+
             .layout {
                 display: block;
             }
@@ -232,8 +258,11 @@ $walletStatus = $user['wallet_address']
             .stats {
                 grid-template-columns: 1fr;
             }
+
         }
+
     </style>
+
 </head>
 
 <body>
@@ -247,19 +276,52 @@ $walletStatus = $user['wallet_address']
         </div>
 
         <nav class="nav">
-            <a href="home.php" class="active">Home</a>
-            <a href="messages.php">Messages</a>
-            <a href="connections.html">Connections</a>
-            <a href="communities.html">Communities</a>
-            <a href="profile.php">Profile</a>
+
+            <a href="home.php" class="active">
+                Home
+            </a>
+
+            <a href="messages.php">
+                Messages
+            </a>
+
+            <a href="connections.php">
+                Connections
+            </a>
+
+            <a href="communities.php">
+                Communities
+            </a>
+
+            <a href="profile.php">
+                Profile
+            </a>
+
+            <a href="notifications.php">
+                Notifications
+            </a>
+
         </nav>
 
         <div class="creator">
-            <?= htmlspecialchars($role) ?>
+
+            <?= htmlspecialchars(
+                $role,
+                ENT_QUOTES,
+                'UTF-8'
+            ) ?>
+
         </div>
 
-        <div class="nav" style="margin-top:20px;">
-            <a href="backend/logout.php">Sign out</a>
+        <div
+            class="nav"
+            style="margin-top:20px;"
+        >
+
+            <a href="backend/logout.php">
+                Sign out
+            </a>
+
         </div>
 
     </aside>
@@ -267,8 +329,20 @@ $walletStatus = $user['wallet_address']
     <main class="main">
 
         <section class="welcome">
-            <h1>Welcome, <?= htmlspecialchars($user['display_name']) ?></h1>
-            <p>Your ConnectID identity is active.</p>
+
+            <h1>
+                Welcome,
+                <?= htmlspecialchars(
+                    $user['display_name'],
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>
+            </h1>
+
+            <p>
+                Your ConnectID identity is active.
+            </p>
+
         </section>
 
         <section class="identity">
@@ -276,19 +350,56 @@ $walletStatus = $user['wallet_address']
             <div class="identity-top">
 
                 <div class="avatar">
-                    Avatar
+
+                    <?php if (!empty($user['avatar'])): ?>
+
+                        <img
+                            src="<?= htmlspecialchars(
+                                $user['avatar'],
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ) ?>"
+                            alt="Avatar"
+                        >
+
+                    <?php else: ?>
+
+                        Avatar
+
+                    <?php endif; ?>
+
                 </div>
 
                 <div>
-                    <h2><?= htmlspecialchars($user['display_name']) ?></h2>
+
+                    <h2>
+                        <?= htmlspecialchars(
+                            $user['display_name'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+                    </h2>
 
                     <div class="username">
-                        @<?= htmlspecialchars($user['username']) ?>
+
+                        @<?= htmlspecialchars(
+                            $user['username'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+
                     </div>
 
                     <div class="role">
-                        <?= htmlspecialchars($role) ?>
+
+                        <?= htmlspecialchars(
+                            $role,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+
                     </div>
+
                 </div>
 
             </div>
@@ -298,38 +409,68 @@ $walletStatus = $user['wallet_address']
         <section class="stats">
 
             <div class="card">
-                <div class="card-label">Reputation</div>
+
+                <div class="card-label">
+                    Reputation
+                </div>
+
                 <div class="card-value">
+
                     <?= (int) $user['reputation'] ?>
+
                 </div>
+
             </div>
 
             <div class="card">
-                <div class="card-label">Identity</div>
+
+                <div class="card-label">
+                    Identity
+                </div>
+
                 <div class="card-value">
+
                     Citizen
+
                 </div>
+
             </div>
 
             <div class="card">
-                <div class="card-label">Wallet</div>
-                <div class="card-value wallet">
-                    <?= htmlspecialchars($walletStatus) ?>
+
+                <div class="card-label">
+                    Wallet
                 </div>
+
+                <div class="card-value wallet">
+
+                    <?= htmlspecialchars(
+                        $walletStatus,
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
+
+                </div>
+
             </div>
 
         </section>
 
         <section class="section">
 
-            <h2>Connect with people</h2>
+            <h2>
+                Connect with people
+            </h2>
 
             <p>
                 Build your network through trusted connections
                 and become part of the ConnectID community.
             </p>
 
-            <a href="connections.php" class="button">
+            <a
+                href="connections.php"
+                class="button"
+            >
                 Find people
             </a>
 
@@ -340,4 +481,5 @@ $walletStatus = $user['wallet_address']
 </div>
 
 </body>
+
 </html>
