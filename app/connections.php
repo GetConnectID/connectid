@@ -1,8 +1,8 @@
 <?php
 
-require_once __DIR__ . '/auth.php';
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/csrf.php';
+require_once __DIR__ . '/backend/auth.php';
+require_once __DIR__ . '/backend/db.php';
+require_once __DIR__ . '/backend/csrf.php';
 
 $userId = (int) $_SESSION['user_id'];
 
