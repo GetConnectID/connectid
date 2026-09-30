@@ -317,7 +317,7 @@ $error = $_GET['error'] ?? '';
 
     <a href="communities.php">Communities</a>
 
-    <a href="logout.php">Logout</a>
+   <a href="backend/logout.php">Logout</a>
 
 </nav>
 
