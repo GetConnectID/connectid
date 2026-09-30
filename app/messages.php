@@ -382,7 +382,7 @@ $connections = $connectionsStmt->fetchAll();
     <a href="connections.php">Connections</a>
     <a href="messages.php">Messages</a>
     <a href="communities.php">Communities</a>
-    <a href="logout.php">Logout</a>
+    <a href="backend/logout.php">Logout</a>
 </nav>
 
 <div class="layout">
