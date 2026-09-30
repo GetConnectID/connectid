@@ -700,11 +700,11 @@ function renderConnectionAvatar(array $user): string
         <div class="sidebar-bottom">
 
             <a
-                href="logout.php"
-                class="logout-link"
-            >
-                Sign out
-            </a>
+    href="backend/logout.php"
+    class="logout-link"
+>
+    Sign out
+</a>
 
         </div>
 
