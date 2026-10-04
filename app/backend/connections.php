@@ -15,15 +15,13 @@ verifyCsrfToken($_POST['csrf_token'] ?? null);
 $userId = (int) $_SESSION['user_id'];
 
 $username = trim($_POST['username'] ?? '');
-
 $username = ltrim($username, '@');
 
-if ($username === '' || strlen($username) > 30) {
-    header('Location: ../connections.php?error=invalid_username');
-    exit;
-}
-
-if (!preg_match('/^[A-Za-z0-9_]+$/', $username)) {
+if (
+    $username === '' ||
+    strlen($username) > 30 ||
+    !preg_match('/^[A-Za-z0-9_]+$/', $username)
+) {
     header('Location: ../connections.php?error=invalid_username');
     exit;
 }
@@ -51,7 +49,10 @@ $stmt->execute([
 
 $targetUser = $stmt->fetch();
 
-if (!$targetUser || $targetUser['status'] !== 'active') {
+if (
+    !$targetUser ||
+    $targetUser['status'] !== 'active'
+) {
     header('Location: ../connections.php?error=user_not_found');
     exit;
 }
@@ -65,123 +66,170 @@ if ($targetUserId === $userId) {
 
 /*
 |--------------------------------------------------------------------------
-| Check existing connection
+| Check existing connection in current direction
 |--------------------------------------------------------------------------
 */
 
-$existing = $pdo->prepare("
+$stmt = $pdo->prepare("
     SELECT
         id,
+        requester_id,
+        receiver_id,
         status
     FROM connections
-    WHERE
-        (
-            requester_id = :user_id
-            AND receiver_id = :target_id
-        )
-        OR
-        (
-            requester_id = :target_id
-            AND receiver_id = :user_id
-        )
+    WHERE requester_id = :requester_id
+      AND receiver_id = :receiver_id
     LIMIT 1
 ");
 
-$existing->execute([
-    ':user_id' => $userId,
-    ':target_id' => $targetUserId
+$stmt->execute([
+    ':requester_id' => $userId,
+    ':receiver_id' => $targetUserId
 ]);
 
-$connection = $existing->fetch();
+$connection = $stmt->fetch();
 
-if ($connection) {
+/*
+|--------------------------------------------------------------------------
+| Check existing connection in reverse direction
+|--------------------------------------------------------------------------
+*/
 
-    if ($connection['status'] === 'accepted') {
-        header('Location: ../connections.php?error=already_connected');
-        exit;
-    }
+if (!$connection) {
 
-    if ($connection['status'] === 'pending') {
-        header('Location: ../connections.php?error=already_pending');
-        exit;
-    }
+    $stmt = $pdo->prepare("
+        SELECT
+            id,
+            requester_id,
+            receiver_id,
+            status
+        FROM connections
+        WHERE requester_id = :requester_id
+          AND receiver_id = :receiver_id
+        LIMIT 1
+    ");
 
-    if ($connection['status'] === 'declined') {
+    $stmt->execute([
+        ':requester_id' => $targetUserId,
+        ':receiver_id' => $userId
+    ]);
+
+    $connection = $stmt->fetch();
+}
+
+/*
+|--------------------------------------------------------------------------
+| Existing accepted connection
+|--------------------------------------------------------------------------
+*/
+
+if (
+    $connection &&
+    $connection['status'] === 'accepted'
+) {
+    header('Location: ../connections.php?error=already_connected');
+    exit;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Existing pending request
+|--------------------------------------------------------------------------
+*/
+
+if (
+    $connection &&
+    $connection['status'] === 'pending'
+) {
+    header('Location: ../connections.php?error=already_pending');
+    exit;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Create or reactivate connection
+|--------------------------------------------------------------------------
+*/
+
+try {
+
+    $pdo->beginTransaction();
+
+    if (
+        $connection &&
+        $connection['status'] === 'declined'
+    ) {
 
         $update = $pdo->prepare("
             UPDATE connections
             SET
-                requester_id = :user_id,
-                receiver_id = :target_id,
+                requester_id = :requester_id,
+                receiver_id = :receiver_id,
                 status = 'pending',
                 created_at = CURRENT_TIMESTAMP
             WHERE id = :connection_id
         ");
 
         $update->execute([
-            ':user_id' => $userId,
-            ':target_id' => $targetUserId,
+            ':requester_id' => $userId,
+            ':receiver_id' => $targetUserId,
             ':connection_id' => (int) $connection['id']
         ]);
 
-        createNotification(
-            $pdo,
-            $targetUserId,
-            'connection_request',
-            'New connection request',
-            '@' . $_SESSION['username'] . ' wants to connect with you.',
-            'connection',
-            (int) $connection['id']
-        );
+        $connectionId = (int) $connection['id'];
 
-        header('Location: ../connections.php?sent=1');
-        exit;
+    } else {
+
+        $insert = $pdo->prepare("
+            INSERT INTO connections
+            (
+                requester_id,
+                receiver_id,
+                status
+            )
+            VALUES
+            (
+                :requester_id,
+                :receiver_id,
+                'pending'
+            )
+        ");
+
+        $insert->execute([
+            ':requester_id' => $userId,
+            ':receiver_id' => $targetUserId
+        ]);
+
+        $connectionId = (int) $pdo->lastInsertId();
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Notification
+    |--------------------------------------------------------------------------
+    */
+
+    createNotification(
+        $pdo,
+        $targetUserId,
+        'connection_request',
+        'New connection request',
+        '@' . $_SESSION['username'] . ' wants to connect with you.',
+        'connection',
+        $connectionId
+    );
+
+    $pdo->commit();
+
+    header('Location: ../connections.php?sent=1');
+    exit;
+
+} catch (Throwable $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    header('Location: ../connections.php?error=connection_failed');
+    exit;
 }
-
-/*
-|--------------------------------------------------------------------------
-| Create new connection request
-|--------------------------------------------------------------------------
-*/
-
-$insert = $pdo->prepare("
-    INSERT INTO connections
-    (
-        requester_id,
-        receiver_id,
-        status
-    )
-    VALUES
-    (
-        :requester_id,
-        :receiver_id,
-        'pending'
-    )
-");
-
-$insert->execute([
-    ':requester_id' => $userId,
-    ':receiver_id' => $targetUserId
-]);
-
-$connectionId = (int) $pdo->lastInsertId();
-
-/*
-|--------------------------------------------------------------------------
-| Create notification
-|--------------------------------------------------------------------------
-*/
-
-createNotification(
-    $pdo,
-    $targetUserId,
-    'connection_request',
-    'New connection request',
-    '@' . $_SESSION['username'] . ' wants to connect with you.',
-    'connection',
-    $connectionId
-);
-
-header('Location: ../connections.php?sent=1');
-exit;
