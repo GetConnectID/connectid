@@ -13,103 +13,233 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 verifyCsrfToken($_POST['csrf_token'] ?? null);
 
 $userId = (int) $_SESSION['user_id'];
-$connectionId = (int) ($_POST['connection_id'] ?? 0);
-$action = trim($_POST['action'] ?? '');
 
-if ($connectionId <= 0 || !in_array($action, ['accept', 'decline'], true)) {
-    header('Location: ../connections.php?error=invalid');
-    exit;
-}
-
-$stmt = $pdo->prepare("
-    SELECT
-        id,
-        requester_id,
-        receiver_id,
-        status
-    FROM connections
-    WHERE id = :connection_id
-    LIMIT 1
-");
-
-$stmt->execute([
-    ':connection_id' => $connectionId
-]);
-
-$connection = $stmt->fetch();
+$username = trim($_POST['username'] ?? '');
+$username = ltrim($username, '@');
 
 if (
-    !$connection ||
-    (int) $connection['receiver_id'] !== $userId ||
-    $connection['status'] !== 'pending'
+    $username === '' ||
+    strlen($username) > 30 ||
+    !preg_match('/^[A-Za-z0-9_]+$/', $username)
 ) {
-    header('Location: ../connections.php?error=unauthorized');
+    header('Location: ../connections.php?error=invalid_username');
     exit;
 }
 
-$requesterId = (int) $connection['requester_id'];
+try {
 
-if ($action === 'accept') {
+    /*
+    |--------------------------------------------------------------------------
+    | Find target user
+    |--------------------------------------------------------------------------
+    */
 
-    $update = $pdo->prepare("
-        UPDATE connections
-        SET status = 'accepted'
-        WHERE id = :connection_id
-        AND receiver_id = :user_id
-        AND status = 'pending'
+    $stmt = $pdo->prepare("
+        SELECT
+            id,
+            username,
+            display_name,
+            status
+        FROM users
+        WHERE username = :username
+        LIMIT 1
     ");
 
-    $update->execute([
-        ':connection_id' => $connectionId,
-        ':user_id' => $userId
+    $stmt->execute([
+        ':username' => $username
     ]);
 
-    if ($update->rowCount() !== 1) {
-        header('Location: ../connections.php?error=update');
+    $targetUser = $stmt->fetch();
+
+    if (
+        !$targetUser ||
+        $targetUser['status'] !== 'active'
+    ) {
+        header('Location: ../connections.php?error=user_not_found');
         exit;
     }
 
+    $targetUserId = (int) $targetUser['id'];
+
+    /*
+    |--------------------------------------------------------------------------
+    | Prevent self connection
+    |--------------------------------------------------------------------------
+    */
+
+    if ($targetUserId === $userId) {
+        header('Location: ../connections.php?error=self');
+        exit;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Check existing connection
+    |--------------------------------------------------------------------------
+    */
+
+    $existing = $pdo->prepare("
+        SELECT
+            id,
+            requester_id,
+            receiver_id,
+            status
+        FROM connections
+        WHERE
+            (
+                requester_id = :current_user_id
+                AND receiver_id = :target_user_id
+            )
+            OR
+            (
+                requester_id = :target_user_id
+                AND receiver_id = :current_user_id
+            )
+        LIMIT 1
+    ");
+
+    $existing->execute([
+        ':current_user_id' => $userId,
+        ':target_user_id' => $targetUserId
+    ]);
+
+    $connection = $existing->fetch();
+
+    /*
+    |--------------------------------------------------------------------------
+    | Existing accepted connection
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        $connection &&
+        $connection['status'] === 'accepted'
+    ) {
+        header('Location: ../connections.php?error=already_connected');
+        exit;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Existing pending request
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        $connection &&
+        $connection['status'] === 'pending'
+    ) {
+        header('Location: ../connections.php?error=already_pending');
+        exit;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Start transaction
+    |--------------------------------------------------------------------------
+    */
+
+    $pdo->beginTransaction();
+
+    /*
+    |--------------------------------------------------------------------------
+    | Re-use declined connection
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        $connection &&
+        $connection['status'] === 'declined'
+    ) {
+
+        $update = $pdo->prepare("
+            UPDATE connections
+            SET
+                requester_id = :requester_id,
+                receiver_id = :receiver_id,
+                status = 'pending',
+                created_at = CURRENT_TIMESTAMP
+            WHERE id = :connection_id
+        ");
+
+        $update->execute([
+            ':requester_id' => $userId,
+            ':receiver_id' => $targetUserId,
+            ':connection_id' => (int) $connection['id']
+        ]);
+
+        $connectionId = (int) $connection['id'];
+
+    } else {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Create new connection request
+        |--------------------------------------------------------------------------
+        */
+
+        $insert = $pdo->prepare("
+            INSERT INTO connections
+            (
+                requester_id,
+                receiver_id,
+                status
+            )
+            VALUES
+            (
+                :requester_id,
+                :receiver_id,
+                'pending'
+            )
+        ");
+
+        $insert->execute([
+            ':requester_id' => $userId,
+            ':receiver_id' => $targetUserId
+        ]);
+
+        $connectionId = (int) $pdo->lastInsertId();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Create notification
+    |--------------------------------------------------------------------------
+    */
+
     createNotification(
         $pdo,
-        $requesterId,
-        'connection',
-        'Connection accepted',
-        ($_SESSION['display_name'] ?? $_SESSION['username']) . ' accepted your connection request.',
+        $targetUserId,
+        'connection_request',
+        'New connection request',
+        '@' . $_SESSION['username'] . ' wants to connect with you.',
         'connection',
         $connectionId
     );
 
-    header('Location: ../connections.php?success=accepted');
+    /*
+    |--------------------------------------------------------------------------
+    | Commit
+    |--------------------------------------------------------------------------
+    */
+
+    $pdo->commit();
+
+    header('Location: ../connections.php?sent=1');
+    exit;
+
+} catch (Throwable $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Never expose database errors to the user
+    |--------------------------------------------------------------------------
+    */
+
+    header('Location: ../connections.php?error=connection_failed');
     exit;
 }
-
-$update = $pdo->prepare("
-    UPDATE connections
-    SET status = 'declined'
-    WHERE id = :connection_id
-    AND receiver_id = :user_id
-    AND status = 'pending'
-");
-
-$update->execute([
-    ':connection_id' => $connectionId,
-    ':user_id' => $userId
-]);
-
-if ($update->rowCount() !== 1) {
-    header('Location: ../connections.php?error=update');
-    exit;
-}
-
-createNotification(
-    $pdo,
-    $requesterId,
-    'connection',
-    'Connection request declined',
-    ($_SESSION['display_name'] ?? $_SESSION['username']) . ' declined your connection request.',
-    'connection',
-    $connectionId
-);
-
-header('Location: ../connections.php?success=declined');
-exit;
