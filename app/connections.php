@@ -152,7 +152,7 @@ $errorMessages = [
     'user_not_found' => 'User not found.',
     'self' => 'You cannot connect with yourself.',
     'already_connected' => 'You are already connected with this user.',
-    'already_pending' => 'A connection request is already pending.'
+    'already_pending' => 'A connection request is already pending.',
     'connection_failed' => 'We could not send the connection request. Please try again.'
 ];
 
