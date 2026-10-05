@@ -3,7 +3,6 @@
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/csrf.php';
-require_once __DIR__ . '/notification_service.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ../messages.php');
@@ -14,120 +13,159 @@ verifyCsrfToken($_POST['csrf_token'] ?? null);
 
 $userId = (int) $_SESSION['user_id'];
 
-$targetUsername = trim($_POST['receiver_username'] ?? '');
+$receiverUsername = trim($_POST['receiver_username'] ?? '');
 $message = trim($_POST['message'] ?? '');
 
-if ($targetUsername === '' || $message === '') {
-    header('Location: ../messages.php?error=missing');
+$receiverUsername = ltrim($receiverUsername, '@');
+
+if (
+    $receiverUsername === '' ||
+    strlen($receiverUsername) > 30 ||
+    !preg_match('/^[A-Za-z0-9_]+$/', $receiverUsername)
+) {
+    header('Location: ../messages.php?error=invalid_user');
+    exit;
+}
+
+if ($message === '') {
+    header(
+        'Location: ../messages.php?user=' .
+        urlencode($receiverUsername) .
+        '&error=empty_message'
+    );
     exit;
 }
 
 if (mb_strlen($message) > 2000) {
-    header('Location: ../messages.php?error=too_long');
+    header(
+        'Location: ../messages.php?user=' .
+        urlencode($receiverUsername) .
+        '&error=message_too_long'
+    );
     exit;
 }
+
+/*
+|--------------------------------------------------------------------------
+| Find receiver
+|--------------------------------------------------------------------------
+*/
 
 $stmt = $pdo->prepare("
     SELECT
         id,
         username,
-        display_name
+        display_name,
+        status
     FROM users
-    WHERE username = :username
-    AND status = 'active'
+    WHERE username = :receiver_username
     LIMIT 1
 ");
 
 $stmt->execute([
-    ':username' => $targetUsername
+    ':receiver_username' => $receiverUsername
 ]);
 
-$targetUser = $stmt->fetch();
+$receiver = $stmt->fetch();
 
-if (!$targetUser) {
-    header('Location: ../messages.php?error=user');
+if (
+    !$receiver ||
+    $receiver['status'] !== 'active'
+) {
+    header(
+        'Location: ../messages.php?error=user_not_found'
+    );
     exit;
 }
 
-$targetUserId = (int) $targetUser['id'];
+$receiverId = (int) $receiver['id'];
 
-if ($targetUserId === $userId) {
-    header('Location: ../messages.php?user=' . urlencode($targetUsername) . '&error=self');
+if ($receiverId === $userId) {
+    header(
+        'Location: ../messages.php?user=' .
+        urlencode($receiverUsername) .
+        '&error=self_message'
+    );
     exit;
 }
 
-$connection = $pdo->prepare("
+/*
+|--------------------------------------------------------------------------
+| Verify accepted connection
+|--------------------------------------------------------------------------
+*/
+
+$connectionStmt = $pdo->prepare("
     SELECT id
     FROM connections
     WHERE status = 'accepted'
     AND (
-        (requester_id = :user_id AND receiver_id = :target_id)
+        (
+            requester_id = :current_user_id
+            AND receiver_id = :target_user_id
+        )
         OR
-        (requester_id = :target_id AND receiver_id = :user_id)
+        (
+            requester_id = :target_user_id_reverse
+            AND receiver_id = :current_user_reverse
+        )
     )
     LIMIT 1
 ");
 
-$connection->execute([
-    ':user_id' => $userId,
-    ':target_id' => $targetUserId
+$connectionStmt->execute([
+    ':current_user_id' => $userId,
+    ':target_user_id' => $receiverId,
+    ':target_user_id_reverse' => $receiverId,
+    ':current_user_reverse' => $userId
 ]);
 
-if (!$connection->fetch()) {
-    header('Location: ../messages.php?user=' . urlencode($targetUsername) . '&error=not_connected');
-    exit;
-}
+$connection = $connectionStmt->fetch();
 
-$pdo->beginTransaction();
-
-try {
-
-    $insert = $pdo->prepare("
-        INSERT INTO messages
-        (
-            sender_id,
-            receiver_id,
-            message
-        )
-        VALUES
-        (
-            :sender_id,
-            :receiver_id,
-            :message
-        )
-    ");
-
-    $insert->execute([
-        ':sender_id' => $userId,
-        ':receiver_id' => $targetUserId,
-        ':message' => $message
-    ]);
-
-    $messageId = (int) $pdo->lastInsertId();
-
-    $senderName = $_SESSION['display_name'] ?? $_SESSION['username'];
-
-    createNotification(
-        $pdo,
-        $targetUserId,
-        'message',
-        'New message',
-        $senderName . ' sent you a message.',
-        'message',
-        $messageId
+if (!$connection) {
+    header(
+        'Location: ../messages.php?user=' .
+        urlencode($receiverUsername) .
+        '&error=not_connected'
     );
-
-    $pdo->commit();
-
-} catch (Throwable $e) {
-
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-
-    header('Location: ../messages.php?user=' . urlencode($targetUsername) . '&error=send');
     exit;
 }
 
-header('Location: ../messages.php?user=' . urlencode($targetUsername));
+/*
+|--------------------------------------------------------------------------
+| Send message
+|--------------------------------------------------------------------------
+*/
+
+$insert = $pdo->prepare("
+    INSERT INTO messages
+    (
+        sender_id,
+        receiver_id,
+        message
+    )
+    VALUES
+    (
+        :sender_id,
+        :receiver_id,
+        :message
+    )
+");
+
+$insert->execute([
+    ':sender_id' => $userId,
+    ':receiver_id' => $receiverId,
+    ':message' => $message
+]);
+
+/*
+|--------------------------------------------------------------------------
+| Return to conversation
+|--------------------------------------------------------------------------
+*/
+
+header(
+    'Location: ../messages.php?user=' .
+    urlencode($receiverUsername)
+);
 exit;
