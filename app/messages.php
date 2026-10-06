@@ -14,6 +14,25 @@ $connectionAccepted = false;
 
 /*
 |--------------------------------------------------------------------------
+| Total unread messages
+|--------------------------------------------------------------------------
+*/
+
+$unreadStmt = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM messages
+    WHERE receiver_id = :unread_receiver_id
+    AND read_at IS NULL
+");
+
+$unreadStmt->execute([
+    ':unread_receiver_id' => $userId
+]);
+
+$totalUnreadMessages = (int) $unreadStmt->fetchColumn();
+
+/*
+|--------------------------------------------------------------------------
 | Load selected user
 |--------------------------------------------------------------------------
 */
@@ -43,14 +62,11 @@ if ($targetUsername !== '') {
 
     if ($targetUser) {
 
+        $targetUserId = (int) $targetUser['id'];
+
         /*
          * Check accepted connection.
-         *
-         * Separate parameter names are intentionally used
-         * because PDO native prepared statements do not
-         * safely support reusing the same named placeholder.
          */
-        $targetUserId = (int) $targetUser['id'];
 
         $connection = $pdo->prepare("
             SELECT id
@@ -82,8 +98,26 @@ if ($targetUsername !== '') {
         if ($connectionAccepted) {
 
             /*
+             * Mark incoming messages in this conversation as read.
+             */
+
+            $markRead = $pdo->prepare("
+                UPDATE messages
+                SET read_at = CURRENT_TIMESTAMP
+                WHERE receiver_id = :read_receiver_id
+                AND sender_id = :read_sender_id
+                AND read_at IS NULL
+            ");
+
+            $markRead->execute([
+                ':read_receiver_id' => $userId,
+                ':read_sender_id' => $targetUserId
+            ]);
+
+            /*
              * Load conversation.
              */
+
             $messageStmt = $pdo->prepare("
                 SELECT
                     m.id,
@@ -91,6 +125,7 @@ if ($targetUsername !== '') {
                     m.receiver_id,
                     m.message,
                     m.created_at,
+                    m.read_at,
                     u.username,
                     u.display_name
                 FROM messages m
@@ -117,6 +152,24 @@ if ($targetUsername !== '') {
             ]);
 
             $messages = $messageStmt->fetchAll();
+
+            /*
+             * Refresh total unread count after marking this
+             * conversation as read.
+             */
+
+            $unreadStmt = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM messages
+                WHERE receiver_id = :unread_receiver_id_after
+                AND read_at IS NULL
+            ");
+
+            $unreadStmt->execute([
+                ':unread_receiver_id_after' => $userId
+            ]);
+
+            $totalUnreadMessages = (int) $unreadStmt->fetchColumn();
         }
     }
 }
@@ -133,14 +186,25 @@ $connectionsStmt = $pdo->prepare("
         u.display_name,
         u.avatar,
         u.role,
-        u.reputation
+        u.reputation,
+
+        (
+            SELECT COUNT(*)
+            FROM messages m
+            WHERE m.sender_id = u.id
+            AND m.receiver_id = :unread_sidebar_receiver_id
+            AND m.read_at IS NULL
+        ) AS unread_count
+
     FROM connections c
+
     JOIN users u
         ON u.id = CASE
             WHEN c.requester_id = :sidebar_user_id
             THEN c.receiver_id
             ELSE c.requester_id
         END
+
     WHERE
         (
             c.requester_id = :sidebar_user_id_2
@@ -148,10 +212,14 @@ $connectionsStmt = $pdo->prepare("
         )
         AND c.status = 'accepted'
         AND u.status = 'active'
-    ORDER BY u.display_name ASC
+
+    ORDER BY
+        unread_count DESC,
+        u.display_name ASC
 ");
 
 $connectionsStmt->execute([
+    ':unread_sidebar_receiver_id' => $userId,
     ':sidebar_user_id' => $userId,
     ':sidebar_user_id_2' => $userId,
     ':sidebar_user_id_3' => $userId
@@ -196,6 +264,28 @@ $connections = $connectionsStmt->fetchAll();
             color: #ff7a00;
         }
 
+        .messages-nav-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .nav-badge,
+        .unread-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            padding: 0 6px;
+            border-radius: 10px;
+            background: #ff7a00;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
         .layout {
             max-width: 1100px;
             height: calc(100vh - 70px);
@@ -234,6 +324,17 @@ $connections = $connectionsStmt->fetchAll();
         .contact.active {
             background: #1b1b1b;
             border-left: 3px solid #ff7a00;
+        }
+
+        .contact-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .contact-text {
+            min-width: 0;
         }
 
         .contact-name {
@@ -377,12 +478,33 @@ $connections = $connectionsStmt->fetchAll();
 <body>
 
 <nav>
+
     <a href="home.php">Home</a>
+
     <a href="profile.php">Profile</a>
+
     <a href="connections.php">Connections</a>
-    <a href="messages.php">Messages</a>
+
+    <a
+        href="messages.php"
+        class="messages-nav-link"
+    >
+        Messages
+
+        <?php if ($totalUnreadMessages > 0): ?>
+
+            <span class="nav-badge">
+                <?= $totalUnreadMessages > 99 ? '99+' : $totalUnreadMessages ?>
+            </span>
+
+        <?php endif; ?>
+
+    </a>
+
     <a href="communities.php">Communities</a>
+
     <a href="backend/logout.php">Logout</a>
+
 </nav>
 
 <div class="layout">
@@ -408,12 +530,28 @@ $connections = $connectionsStmt->fetchAll();
                     class="contact <?= $targetUsername === $connection['username'] ? 'active' : '' ?>"
                 >
 
-                    <div class="contact-name">
-                        <?= htmlspecialchars($connection['display_name']) ?>
-                    </div>
+                    <div class="contact-row">
 
-                    <div class="contact-username">
-                        @<?= htmlspecialchars($connection['username']) ?>
+                        <div class="contact-text">
+
+                            <div class="contact-name">
+                                <?= htmlspecialchars($connection['display_name']) ?>
+                            </div>
+
+                            <div class="contact-username">
+                                @<?= htmlspecialchars($connection['username']) ?>
+                            </div>
+
+                        </div>
+
+                        <?php if ((int) $connection['unread_count'] > 0): ?>
+
+                            <span class="unread-badge">
+                                <?= (int) $connection['unread_count'] > 99 ? '99+' : (int) $connection['unread_count'] ?>
+                            </span>
+
+                        <?php endif; ?>
+
                     </div>
 
                 </a>
@@ -532,18 +670,62 @@ $connections = $connectionsStmt->fetchAll();
 <?php if ($targetUser && $connectionAccepted): ?>
 
 <script>
-const messagesContainer = document.getElementById('messages');
-const targetUsername = messagesContainer.dataset.target;
+
+const messagesContainer =
+    document.getElementById('messages');
+
+const targetUsername =
+    messagesContainer.dataset.target;
 
 let lastMessageId = 0;
 
-const existingMessages = messagesContainer.querySelectorAll('[data-message-id]');
+const existingMessages =
+    messagesContainer.querySelectorAll(
+        '[data-message-id]'
+    );
 
 if (existingMessages.length > 0) {
+
     lastMessageId = parseInt(
-        existingMessages[existingMessages.length - 1].dataset.messageId,
+        existingMessages[
+            existingMessages.length - 1
+        ].dataset.messageId,
         10
     );
+}
+
+async function markMessagesRead() {
+
+    try {
+
+        await fetch(
+            'backend/mark_messages_read.php',
+            {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type':
+                        'application/x-www-form-urlencoded'
+                },
+                body:
+                    'csrf_token=' +
+                    encodeURIComponent(
+                        '<?= htmlspecialchars($csrfToken, ENT_QUOTES) ?>'
+                    ) +
+                    '&username=' +
+                    encodeURIComponent(
+                        targetUsername
+                    )
+            }
+        );
+
+    } catch (error) {
+
+        /*
+         * Ignore temporary read-status failures.
+         */
+
+    }
 }
 
 async function refreshMessages() {
@@ -577,34 +759,45 @@ async function refreshMessages() {
 
             if (
                 document.querySelector(
-                    '[data-message-id="' + message.id + '"]'
+                    '[data-message-id="' +
+                    message.id +
+                    '"]'
                 )
             ) {
                 return;
             }
 
-            const element = document.createElement('div');
+            const element =
+                document.createElement('div');
 
             element.className =
                 'message ' +
                 (
-                    parseInt(message.sender_id, 10) === <?= $userId ?>
+                    parseInt(
+                        message.sender_id,
+                        10
+                    ) === <?= $userId ?>
                         ? 'mine'
                         : 'theirs'
                 );
 
-            element.dataset.messageId = message.id;
+            element.dataset.messageId =
+                message.id;
 
-            const text = document.createElement('div');
+            const text =
+                document.createElement('div');
 
-            /*
-             * Treat incoming message text as plain text.
-             */
-            text.textContent = message.message;
+            text.textContent =
+                message.message;
 
-            const time = document.createElement('div');
-            time.className = 'message-time';
-            time.textContent = message.created_at;
+            const time =
+                document.createElement('div');
+
+            time.className =
+                'message-time';
+
+            time.textContent =
+                message.created_at;
 
             element.appendChild(text);
             element.appendChild(time);
@@ -613,28 +806,42 @@ async function refreshMessages() {
 
             lastMessageId = Math.max(
                 lastMessageId,
-                parseInt(message.id, 10)
+                parseInt(
+                    message.id,
+                    10
+                )
             );
 
             added = true;
         });
 
         if (added) {
+
             messagesContainer.scrollTop =
                 messagesContainer.scrollHeight;
+
+            await markMessagesRead();
         }
 
     } catch (error) {
+
         /*
          * Ignore temporary polling failures.
          */
+
     }
 }
 
 messagesContainer.scrollTop =
     messagesContainer.scrollHeight;
 
-setInterval(refreshMessages, 3000);
+markMessagesRead();
+
+setInterval(
+    refreshMessages,
+    3000
+);
+
 </script>
 
 <?php endif; ?>
