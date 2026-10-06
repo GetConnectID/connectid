@@ -8,32 +8,16 @@ $userId = (int) $_SESSION['user_id'];
 $csrfToken = csrfToken();
 
 $targetUsername = trim($_GET['user'] ?? '');
+$targetUsername = ltrim($targetUsername, '@');
+
 $targetUser = null;
 $messages = [];
+$connections = [];
 $connectionAccepted = false;
 
 /*
 |--------------------------------------------------------------------------
-| Total unread messages
-|--------------------------------------------------------------------------
-*/
-
-$unreadStmt = $pdo->prepare("
-    SELECT COUNT(*)
-    FROM messages
-    WHERE receiver_id = :unread_receiver_id
-    AND read_at IS NULL
-");
-
-$unreadStmt->execute([
-    ':unread_receiver_id' => $userId
-]);
-
-$totalUnreadMessages = (int) $unreadStmt->fetchColumn();
-
-/*
-|--------------------------------------------------------------------------
-| Load selected user
+| Selected user
 |--------------------------------------------------------------------------
 */
 
@@ -65,57 +49,42 @@ if ($targetUsername !== '') {
         $targetUserId = (int) $targetUser['id'];
 
         /*
-         * Check accepted connection.
+         * Check connection.
          */
 
-        $connection = $pdo->prepare("
+        $connectionStmt = $pdo->prepare("
             SELECT id
             FROM connections
             WHERE status = 'accepted'
-            AND (
+            AND
+            (
                 (
-                    requester_id = :connection_user_id
-                    AND receiver_id = :connection_target_id
+                    requester_id = :user_id
+                    AND receiver_id = :target_id
                 )
                 OR
                 (
-                    requester_id = :connection_target_id_2
-                    AND receiver_id = :connection_user_id_2
+                    requester_id = :target_id_2
+                    AND receiver_id = :user_id_2
                 )
             )
             LIMIT 1
         ");
 
-        $connection->execute([
-            ':connection_user_id' => $userId,
-            ':connection_target_id' => $targetUserId,
-            ':connection_target_id_2' => $targetUserId,
-            ':connection_user_id_2' => $userId
+        $connectionStmt->execute([
+            ':user_id' => $userId,
+            ':target_id' => $targetUserId,
+            ':target_id_2' => $targetUserId,
+            ':user_id_2' => $userId
         ]);
 
-        $connectionAccepted = (bool) $connection->fetch();
+        $connectionAccepted =
+            (bool) $connectionStmt->fetch();
 
         if ($connectionAccepted) {
 
             /*
-             * Mark incoming messages in this conversation as read.
-             */
-
-            $markRead = $pdo->prepare("
-                UPDATE messages
-                SET read_at = CURRENT_TIMESTAMP
-                WHERE receiver_id = :read_receiver_id
-                AND sender_id = :read_sender_id
-                AND read_at IS NULL
-            ");
-
-            $markRead->execute([
-                ':read_receiver_id' => $userId,
-                ':read_sender_id' => $targetUserId
-            ]);
-
-            /*
-             * Load conversation.
+             * Load complete conversation.
              */
 
             $messageStmt = $pdo->prepare("
@@ -129,59 +98,61 @@ if ($targetUsername !== '') {
                     u.username,
                     u.display_name
                 FROM messages m
-                JOIN users u
+                INNER JOIN users u
                     ON u.id = m.sender_id
                 WHERE
                     (
-                        m.sender_id = :message_user_id
-                        AND m.receiver_id = :message_target_id
+                        m.sender_id = :user_id
+                        AND m.receiver_id = :target_id
                     )
                     OR
                     (
-                        m.sender_id = :message_target_id_2
-                        AND m.receiver_id = :message_user_id_2
+                        m.sender_id = :target_id_2
+                        AND m.receiver_id = :user_id_2
                     )
-                ORDER BY m.created_at ASC, m.id ASC
+                ORDER BY m.id ASC
             ");
 
             $messageStmt->execute([
-                ':message_user_id' => $userId,
-                ':message_target_id' => $targetUserId,
-                ':message_target_id_2' => $targetUserId,
-                ':message_user_id_2' => $userId
+                ':user_id' => $userId,
+                ':target_id' => $targetUserId,
+                ':target_id_2' => $targetUserId,
+                ':user_id_2' => $userId
             ]);
 
-            $messages = $messageStmt->fetchAll();
+            $messages =
+                $messageStmt->fetchAll();
 
             /*
-             * Refresh total unread count after marking this
-             * conversation as read.
+             * Opening the conversation marks incoming
+             * messages from this person as read.
              */
 
-            $unreadStmt = $pdo->prepare("
-                SELECT COUNT(*)
-                FROM messages
-                WHERE receiver_id = :unread_receiver_id_after
+            $markRead = $pdo->prepare("
+                UPDATE messages
+                SET read_at = CURRENT_TIMESTAMP
+                WHERE receiver_id = :receiver_id
+                AND sender_id = :sender_id
                 AND read_at IS NULL
             ");
 
-            $unreadStmt->execute([
-                ':unread_receiver_id_after' => $userId
+            $markRead->execute([
+                ':receiver_id' => $userId,
+                ':sender_id' => $targetUserId
             ]);
-
-            $totalUnreadMessages = (int) $unreadStmt->fetchColumn();
         }
     }
 }
 
 /*
 |--------------------------------------------------------------------------
-| Connections for sidebar
+| Connections + unread counts
 |--------------------------------------------------------------------------
 */
 
 $connectionsStmt = $pdo->prepare("
     SELECT
+        u.id,
         u.username,
         u.display_name,
         u.avatar,
@@ -190,25 +161,25 @@ $connectionsStmt = $pdo->prepare("
 
         (
             SELECT COUNT(*)
-            FROM messages m
-            WHERE m.sender_id = u.id
-            AND m.receiver_id = :unread_sidebar_receiver_id
-            AND m.read_at IS NULL
+            FROM messages unread_messages
+            WHERE unread_messages.sender_id = u.id
+            AND unread_messages.receiver_id = :unread_receiver_id
+            AND unread_messages.read_at IS NULL
         ) AS unread_count
 
     FROM connections c
 
-    JOIN users u
+    INNER JOIN users u
         ON u.id = CASE
-            WHEN c.requester_id = :sidebar_user_id
+            WHEN c.requester_id = :connection_user_id
             THEN c.receiver_id
             ELSE c.requester_id
         END
 
     WHERE
         (
-            c.requester_id = :sidebar_user_id_2
-            OR c.receiver_id = :sidebar_user_id_3
+            c.requester_id = :connection_user_id_2
+            OR c.receiver_id = :connection_user_id_3
         )
         AND c.status = 'accepted'
         AND u.status = 'active'
@@ -219,31 +190,62 @@ $connectionsStmt = $pdo->prepare("
 ");
 
 $connectionsStmt->execute([
-    ':unread_sidebar_receiver_id' => $userId,
-    ':sidebar_user_id' => $userId,
-    ':sidebar_user_id_2' => $userId,
-    ':sidebar_user_id_3' => $userId
+    ':unread_receiver_id' => $userId,
+    ':connection_user_id' => $userId,
+    ':connection_user_id_2' => $userId,
+    ':connection_user_id_3' => $userId
 ]);
 
-$connections = $connectionsStmt->fetchAll();
+$connections =
+    $connectionsStmt->fetchAll();
+
+/*
+|--------------------------------------------------------------------------
+| Total unread
+|--------------------------------------------------------------------------
+*/
+
+$unreadStmt = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM messages
+    WHERE receiver_id = :receiver_id
+    AND read_at IS NULL
+");
+
+$unreadStmt->execute([
+    ':receiver_id' => $userId
+]);
+
+$totalUnread =
+    (int) $unreadStmt->fetchColumn();
 
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Messages | ConnectID</title>
 
     <style>
+
         * {
             box-sizing: border-box;
         }
 
         body {
             margin: 0;
-            font-family: Arial, Helvetica, sans-serif;
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
             background: #0b0b0b;
             color: #ffffff;
         }
@@ -251,6 +253,7 @@ $connections = $connectionsStmt->fetchAll();
         nav {
             padding: 18px 24px;
             border-bottom: 1px solid #222222;
+            background: #0b0b0b;
         }
 
         nav a {
@@ -264,26 +267,20 @@ $connections = $connectionsStmt->fetchAll();
             color: #ff7a00;
         }
 
-        .messages-nav-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-        }
-
-        .nav-badge,
-        .unread-badge {
+        .nav-unread {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            min-width: 20px;
-            height: 20px;
+            min-width: 18px;
+            height: 18px;
             padding: 0 6px;
-            border-radius: 10px;
+            margin-left: 5px;
+            border-radius: 999px;
             background: #ff7a00;
             color: #ffffff;
             font-size: 11px;
             font-weight: 700;
-            line-height: 1;
+            vertical-align: middle;
         }
 
         .layout {
@@ -330,11 +327,7 @@ $connections = $connectionsStmt->fetchAll();
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
-        }
-
-        .contact-text {
-            min-width: 0;
+            gap: 10px;
         }
 
         .contact-name {
@@ -345,6 +338,21 @@ $connections = $connectionsStmt->fetchAll();
             color: #888888;
             font-size: 13px;
             margin-top: 4px;
+        }
+
+        .unread-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            padding: 0 6px;
+            border-radius: 999px;
+            background: #ff7a00;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
         }
 
         .chat {
@@ -472,38 +480,47 @@ $connections = $connectionsStmt->fetchAll();
                 max-width: 85%;
             }
         }
+
     </style>
+
 </head>
 
 <body>
 
 <nav>
 
-    <a href="home.php">Home</a>
+    <a href="home.php">
+        Home
+    </a>
 
-    <a href="profile.php">Profile</a>
+    <a href="profile.php">
+        Profile
+    </a>
 
-    <a href="connections.php">Connections</a>
+    <a href="connections.php">
+        Connections
+    </a>
 
-    <a
-        href="messages.php"
-        class="messages-nav-link"
-    >
+    <a href="messages.php">
         Messages
 
-        <?php if ($totalUnreadMessages > 0): ?>
+        <?php if ($totalUnread > 0): ?>
 
-            <span class="nav-badge">
-                <?= $totalUnreadMessages > 99 ? '99+' : $totalUnreadMessages ?>
+            <span class="nav-unread">
+                <?= $totalUnread > 99 ? '99+' : $totalUnread ?>
             </span>
 
         <?php endif; ?>
 
     </a>
 
-    <a href="communities.php">Communities</a>
+    <a href="communities.php">
+        Communities
+    </a>
 
-    <a href="backend/logout.php">Logout</a>
+    <a href="backend/logout.php">
+        Logout
+    </a>
 
 </nav>
 
@@ -525,29 +542,43 @@ $connections = $connectionsStmt->fetchAll();
 
             <?php foreach ($connections as $connection): ?>
 
+                <?php
+                $unreadCount =
+                    (int) $connection['unread_count'];
+                ?>
+
                 <a
                     href="messages.php?user=<?= urlencode($connection['username']) ?>"
                     class="contact <?= $targetUsername === $connection['username'] ? 'active' : '' ?>"
+                    data-contact-username="<?= htmlspecialchars($connection['username'], ENT_QUOTES, 'UTF-8') ?>"
                 >
 
                     <div class="contact-row">
 
-                        <div class="contact-text">
+                        <div>
 
                             <div class="contact-name">
-                                <?= htmlspecialchars($connection['display_name']) ?>
+                                <?= htmlspecialchars(
+                                    $connection['display_name'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
                             </div>
 
                             <div class="contact-username">
-                                @<?= htmlspecialchars($connection['username']) ?>
+                                @<?= htmlspecialchars(
+                                    $connection['username'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
                             </div>
 
                         </div>
 
-                        <?php if ((int) $connection['unread_count'] > 0): ?>
+                        <?php if ($unreadCount > 0): ?>
 
                             <span class="unread-badge">
-                                <?= (int) $connection['unread_count'] > 99 ? '99+' : (int) $connection['unread_count'] ?>
+                                <?= $unreadCount > 99 ? '99+' : $unreadCount ?>
                             </span>
 
                         <?php endif; ?>
@@ -581,11 +612,19 @@ $connections = $connectionsStmt->fetchAll();
             <div class="chat-header">
 
                 <div class="chat-name">
-                    <?= htmlspecialchars($targetUser['display_name']) ?>
+                    <?= htmlspecialchars(
+                        $targetUser['display_name'],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
                 </div>
 
                 <div class="chat-username">
-                    @<?= htmlspecialchars($targetUser['username']) ?>
+                    @<?= htmlspecialchars(
+                        $targetUser['username'],
+                        ENT_QUOTES,
+                        'UTF-8'
+                    ) ?>
                 </div>
 
             </div>
@@ -593,12 +632,16 @@ $connections = $connectionsStmt->fetchAll();
             <div
                 class="messages"
                 id="messages"
-                data-target="<?= htmlspecialchars($targetUser['username'], ENT_QUOTES) ?>"
+                data-target="<?= htmlspecialchars(
+                    $targetUser['username'],
+                    ENT_QUOTES,
+                    'UTF-8'
+                ) ?>"
             >
 
                 <?php if (!$messages): ?>
 
-                    <div class="empty">
+                    <div class="empty" id="empty-message">
                         No messages yet. Start the conversation.
                     </div>
 
@@ -611,10 +654,20 @@ $connections = $connectionsStmt->fetchAll();
                             data-message-id="<?= (int) $message['id'] ?>"
                         >
 
-                            <?= nl2br(htmlspecialchars($message['message'])) ?>
+                            <?= nl2br(
+                                htmlspecialchars(
+                                    $message['message'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                )
+                            ) ?>
 
                             <div class="message-time">
-                                <?= htmlspecialchars($message['created_at']) ?>
+                                <?= htmlspecialchars(
+                                    $message['created_at'],
+                                    ENT_QUOTES,
+                                    'UTF-8'
+                                ) ?>
                             </div>
 
                         </div>
@@ -644,13 +697,21 @@ $connections = $connectionsStmt->fetchAll();
                     <input
                         type="hidden"
                         name="receiver_username"
-                        value="<?= htmlspecialchars($targetUser['username']) ?>"
+                        value="<?= htmlspecialchars(
+                            $targetUser['username'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
                     >
 
                     <input
                         type="hidden"
                         name="csrf_token"
-                        value="<?= htmlspecialchars($csrfToken) ?>"
+                        value="<?= htmlspecialchars(
+                            $csrfToken,
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
                     >
 
                     <button type="submit">
@@ -686,160 +747,302 @@ const existingMessages =
 
 if (existingMessages.length > 0) {
 
-    lastMessageId = parseInt(
-        existingMessages[
-            existingMessages.length - 1
-        ].dataset.messageId,
-        10
-    );
+    lastMessageId =
+        parseInt(
+            existingMessages[
+                existingMessages.length - 1
+            ].dataset.messageId,
+            10
+        );
 }
 
-async function markMessagesRead() {
+function removeEmptyMessage() {
 
-    try {
-
-        await fetch(
-            'backend/mark_messages_read.php',
-            {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'Content-Type':
-                        'application/x-www-form-urlencoded'
-                },
-                body:
-                    'csrf_token=' +
-                    encodeURIComponent(
-                        '<?= htmlspecialchars($csrfToken, ENT_QUOTES) ?>'
-                    ) +
-                    '&username=' +
-                    encodeURIComponent(
-                        targetUsername
-                    )
-            }
+    const emptyMessage =
+        document.getElementById(
+            'empty-message'
         );
 
-    } catch (error) {
-
-        /*
-         * Ignore temporary read-status failures.
-         */
-
+    if (emptyMessage) {
+        emptyMessage.remove();
     }
+}
+
+function appendMessage(message) {
+
+    const messageId =
+        parseInt(message.id, 10);
+
+    if (!messageId) {
+        return;
+    }
+
+    if (
+        document.querySelector(
+            '[data-message-id="' +
+            messageId +
+            '"]'
+        )
+    ) {
+        return;
+    }
+
+    removeEmptyMessage();
+
+    const element =
+        document.createElement('div');
+
+    element.className =
+        'message ' +
+        (
+            parseInt(
+                message.sender_id,
+                10
+            ) === <?= $userId ?>
+                ? 'mine'
+                : 'theirs'
+        );
+
+    element.dataset.messageId =
+        String(messageId);
+
+    const text =
+        document.createElement('div');
+
+    text.textContent =
+        message.message || '';
+
+    const time =
+        document.createElement('div');
+
+    time.className =
+        'message-time';
+
+    time.textContent =
+        message.created_at || '';
+
+    element.appendChild(text);
+    element.appendChild(time);
+
+    messagesContainer.appendChild(
+        element
+    );
+
+    lastMessageId =
+        Math.max(
+            lastMessageId,
+            messageId
+        );
 }
 
 async function refreshMessages() {
 
     try {
 
-        const response = await fetch(
-            'backend/get_messages.php?user=' +
-            encodeURIComponent(targetUsername) +
-            '&after_id=' +
-            encodeURIComponent(lastMessageId),
-            {
-                credentials: 'same-origin',
-                cache: 'no-store'
-            }
-        );
+        const response =
+            await fetch(
+                'backend/get_messages.php?user=' +
+                encodeURIComponent(
+                    targetUsername
+                ) +
+                '&after_id=' +
+                encodeURIComponent(
+                    lastMessageId
+                ) +
+                '&_=' +
+                Date.now(),
+                {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    headers: {
+                        'Accept':
+                            'application/json'
+                    }
+                }
+            );
 
         if (!response.ok) {
             return;
         }
 
-        const data = await response.json();
+        const data =
+            await response.json();
 
-        if (!Array.isArray(data.messages)) {
+        if (
+            !data ||
+            data.success !== true ||
+            !Array.isArray(data.messages)
+        ) {
             return;
         }
 
         let added = false;
 
-        data.messages.forEach(message => {
+        data.messages.forEach(
+            function (message) {
 
-            if (
-                document.querySelector(
-                    '[data-message-id="' +
-                    message.id +
-                    '"]'
-                )
-            ) {
-                return;
+                const before =
+                    lastMessageId;
+
+                appendMessage(message);
+
+                if (
+                    lastMessageId >
+                    before
+                ) {
+                    added = true;
+                }
             }
-
-            const element =
-                document.createElement('div');
-
-            element.className =
-                'message ' +
-                (
-                    parseInt(
-                        message.sender_id,
-                        10
-                    ) === <?= $userId ?>
-                        ? 'mine'
-                        : 'theirs'
-                );
-
-            element.dataset.messageId =
-                message.id;
-
-            const text =
-                document.createElement('div');
-
-            text.textContent =
-                message.message;
-
-            const time =
-                document.createElement('div');
-
-            time.className =
-                'message-time';
-
-            time.textContent =
-                message.created_at;
-
-            element.appendChild(text);
-            element.appendChild(time);
-
-            messagesContainer.appendChild(element);
-
-            lastMessageId = Math.max(
-                lastMessageId,
-                parseInt(
-                    message.id,
-                    10
-                )
-            );
-
-            added = true;
-        });
+        );
 
         if (added) {
 
             messagesContainer.scrollTop =
                 messagesContainer.scrollHeight;
-
-            await markMessagesRead();
         }
+
+        /*
+         * Refresh the global unread badge too.
+         */
+        refreshGlobalMessageStatus();
 
     } catch (error) {
 
         /*
          * Ignore temporary polling failures.
          */
+    }
+}
 
+async function refreshGlobalMessageStatus() {
+
+    try {
+
+        const response =
+            await fetch(
+                'backend/message_status.php?_=' +
+                Date.now(),
+                {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    headers: {
+                        'Accept':
+                            'application/json'
+                    }
+                }
+            );
+
+        if (!response.ok) {
+            return;
+        }
+
+        const data =
+            await response.json();
+
+        if (
+            !data ||
+            data.success !== true
+        ) {
+            return;
+        }
+
+        /*
+         * Update the navigation badge.
+         */
+        const links =
+            Array.from(
+                document.querySelectorAll('a')
+            ).filter(function (link) {
+
+                const href =
+                    link.getAttribute(
+                        'href'
+                    ) || '';
+
+                return (
+                    href === 'messages.php' ||
+                    href === './messages.php' ||
+                    href.endsWith(
+                        '/messages.php'
+                    )
+                );
+            });
+
+        links.forEach(
+            function (link) {
+
+                let badge =
+                    link.querySelector(
+                        '.connectid-message-badge'
+                    );
+
+                const total =
+                    parseInt(
+                        data.total_unread,
+                        10
+                    ) || 0;
+
+                if (total > 0) {
+
+                    if (!badge) {
+
+                        badge =
+                            document.createElement(
+                                'span'
+                            );
+
+                        badge.className =
+                            'connectid-message-badge';
+
+                        link.appendChild(
+                            badge
+                        );
+                    }
+
+                    badge.textContent =
+                        total > 99
+                            ? '99+'
+                            : String(total);
+
+                    badge.classList.remove(
+                        'hidden'
+                    );
+
+                } else if (badge) {
+
+                    badge.textContent = '';
+
+                    badge.classList.add(
+                        'hidden'
+                    );
+                }
+            }
+        );
+
+    } catch (error) {
+
+        /*
+         * Ignore temporary failures.
+         */
     }
 }
 
 messagesContainer.scrollTop =
     messagesContainer.scrollHeight;
 
-markMessagesRead();
+/*
+ * Start immediately.
+ */
+refreshMessages();
 
+/*
+ * Check for new messages every 2 seconds.
+ */
 setInterval(
     refreshMessages,
-    3000
+    2000
 );
 
 </script>
@@ -847,4 +1050,5 @@ setInterval(
 <?php endif; ?>
 
 </body>
+
 </html>
