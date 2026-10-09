@@ -137,15 +137,17 @@ $messageStmt = $pdo->prepare("
         ON u.id = m.sender_id
     WHERE
         (
-            m.sender_id = :user_id
-            AND m.receiver_id = :target_id
+            (
+                m.sender_id = :user_id
+                AND m.receiver_id = :target_id
+            )
+            OR
+            (
+                m.sender_id = :target_id_2
+                AND m.receiver_id = :user_id_2
+            )
         )
-        OR
-        (
-            m.sender_id = :target_id_2
-            AND m.receiver_id = :user_id_2
-        )
-    AND m.id > :after_id
+        AND m.id > :after_id
     ORDER BY m.id ASC
     LIMIT 100
 ");
