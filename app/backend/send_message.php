@@ -1,8 +1,38 @@
+```php
 <?php
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/csrf.php';
+
+$isAjax = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest';
+
+function sendResponse(int $status, array $data): void
+{
+    global $isAjax, $receiverUsername;
+
+    if ($isAjax) {
+        http_response_code($status);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+        echo json_encode($data);
+        exit;
+    }
+
+    $url = '../messages.php';
+
+    if (!empty($receiverUsername)) {
+        $url .= '?user=' . urlencode($receiverUsername);
+
+        if (!empty($data['error'])) {
+            $url .= '&error=' . urlencode($data['error']);
+        }
+    }
+
+    header('Location: ' . $url);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ../messages.php');
@@ -23,40 +53,34 @@ if (
     strlen($receiverUsername) > 30 ||
     !preg_match('/^[A-Za-z0-9_]+$/', $receiverUsername)
 ) {
-    header('Location: ../messages.php?error=invalid_user');
-    exit;
+    sendResponse(400, [
+        'success' => false,
+        'error' => 'invalid_user'
+    ]);
 }
 
 if ($message === '') {
-    header(
-        'Location: ../messages.php?user=' .
-        urlencode($receiverUsername) .
-        '&error=empty_message'
-    );
-    exit;
+    sendResponse(400, [
+        'success' => false,
+        'error' => 'empty_message'
+    ]);
 }
 
 if (mb_strlen($message) > 2000) {
-    header(
-        'Location: ../messages.php?user=' .
-        urlencode($receiverUsername) .
-        '&error=message_too_long'
-    );
-    exit;
+    sendResponse(400, [
+        'success' => false,
+        'error' => 'message_too_long'
+    ]);
 }
 
 /*
-|--------------------------------------------------------------------------
+|--------------------------------------------------------------------------|
 | Find receiver
-|--------------------------------------------------------------------------
+|--------------------------------------------------------------------------|
 */
 
 $stmt = $pdo->prepare("
-    SELECT
-        id,
-        username,
-        display_name,
-        status
+    SELECT id, username, status
     FROM users
     WHERE username = :receiver_username
     LIMIT 1
@@ -68,31 +92,26 @@ $stmt->execute([
 
 $receiver = $stmt->fetch();
 
-if (
-    !$receiver ||
-    $receiver['status'] !== 'active'
-) {
-    header(
-        'Location: ../messages.php?error=user_not_found'
-    );
-    exit;
+if (!$receiver || $receiver['status'] !== 'active') {
+    sendResponse(404, [
+        'success' => false,
+        'error' => 'user_not_found'
+    ]);
 }
 
 $receiverId = (int) $receiver['id'];
 
 if ($receiverId === $userId) {
-    header(
-        'Location: ../messages.php?user=' .
-        urlencode($receiverUsername) .
-        '&error=self_message'
-    );
-    exit;
+    sendResponse(400, [
+        'success' => false,
+        'error' => 'self_message'
+    ]);
 }
 
 /*
-|--------------------------------------------------------------------------
+|--------------------------------------------------------------------------|
 | Verify accepted connection
-|--------------------------------------------------------------------------
+|--------------------------------------------------------------------------|
 */
 
 $connectionStmt = $pdo->prepare("
@@ -120,36 +139,22 @@ $connectionStmt->execute([
     ':current_user_reverse' => $userId
 ]);
 
-$connection = $connectionStmt->fetch();
-
-if (!$connection) {
-    header(
-        'Location: ../messages.php?user=' .
-        urlencode($receiverUsername) .
-        '&error=not_connected'
-    );
-    exit;
+if (!$connectionStmt->fetch()) {
+    sendResponse(403, [
+        'success' => false,
+        'error' => 'not_connected'
+    ]);
 }
 
 /*
-|--------------------------------------------------------------------------
-| Send message
-|--------------------------------------------------------------------------
+|--------------------------------------------------------------------------|
+| Save message
+|--------------------------------------------------------------------------|
 */
 
 $insert = $pdo->prepare("
-    INSERT INTO messages
-    (
-        sender_id,
-        receiver_id,
-        message
-    )
-    VALUES
-    (
-        :sender_id,
-        :receiver_id,
-        :message
-    )
+    INSERT INTO messages (sender_id, receiver_id, message)
+    VALUES (:sender_id, :receiver_id, :message)
 ");
 
 $insert->execute([
@@ -158,14 +163,7 @@ $insert->execute([
     ':message' => $message
 ]);
 
-/*
-|--------------------------------------------------------------------------
-| Return to conversation
-|--------------------------------------------------------------------------
-*/
-
-header(
-    'Location: ../messages.php?user=' .
-    urlencode($receiverUsername)
-);
-exit;
+sendResponse(200, [
+    'success' => true
+]);
+```
